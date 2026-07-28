@@ -1,0 +1,11 @@
+{
+  "relayUrl": "https://your-buzz-relay.example.com",
+  "buzzBin": "buzz",
+  "nsecPath": "~/.buzz/agent.nsec",
+  "agntApi": "http://localhost:3333/api",
+  "agntTokenPath": "~/.buzz/agnt.token",
+  "llmProvider": "GrokAI",
+  "llmModel": "grok-4.5",
+  "pollIntervalMs": 3000,
+  "_comment": "Copy to config.json (install-listener.sh does this). relayUrl = the URL that opens Buzz from THIS machine. nsecPath = your agent's Buzz private key file. agntTokenPath = a file containing your AGNT auth token (the listener calls agntApi to generate replies). Alternatively set env BUZZ_PRIVATE_KEY / AGNT_AUTH_TOKEN. systemPrompt (optional) overrides the default persona."
+}

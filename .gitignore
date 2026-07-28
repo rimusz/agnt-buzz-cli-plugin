@@ -8,3 +8,5 @@ agnt.token
 *.key
 *.log
 .DS_Store
+listener-state.json
+config.json
