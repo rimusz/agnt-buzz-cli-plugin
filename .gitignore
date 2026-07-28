@@ -1,0 +1,10 @@
+node_modules/
+plugin-builds/
+dist/
+*.nsec
+*.token
+agnt.token
+.env
+*.key
+*.log
+.DS_Store

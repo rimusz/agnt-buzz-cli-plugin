@@ -1,0 +1,833 @@
+{
+  "name": "buzz-cli-plugin",
+  "version": "1.3.0",
+  "description": "Buzz (Block Nostr workspace) via official buzz CLI. After install: set BUZZ_RELAY_URL + BUZZ_BIN, create AGNT agent, provision identity (tool buzz-provision-identity or script), assign buzz_* tools. See docs/CONNECT-ANY-AGENT.md. Per-agent keys; tools never return private keys.",
+  "author": "AGNT",
+  "icon": "message-square",
+  "homepage": "https://github.com/block/buzz",
+  "tools": [
+    {
+      "type": "buzz-send-message",
+      "entryPoint": "./buzz-send-message.js",
+      "schema": {
+        "title": "Buzz Send Message",
+        "category": "action",
+        "type": "buzz-send-message",
+        "icon": "send",
+        "description": "Send a message to a Buzz channel. Supports reply-to (thread) and optional broadcast. Wraps: buzz messages send.",
+        "parameters": {
+          "channel": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Channel UUID to post into.",
+            "required": true
+          },
+          "content": {
+            "type": "string",
+            "inputType": "textarea",
+            "description": "Message body (markdown/plain). Long bodies are piped via stdin.",
+            "required": true
+          },
+          "replyTo": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional parent event id to reply in a thread.",
+            "required": false
+          },
+          "broadcast": {
+            "type": "boolean",
+            "inputType": "checkbox",
+            "description": "Pass --broadcast to the CLI when true.",
+            "required": false,
+            "default": false
+          },
+          "relayUrl": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Override BUZZ_RELAY_URL for this call (e.g. https://relay.example.com).",
+            "required": false
+          },
+          "privateKey": {
+            "type": "string",
+            "inputType": "password",
+            "description": "Escape-hatch nsec override. Prefer per-agent registry (~/.agnt/buzz-identities). Shared BUZZ_PRIVATE_KEY is disabled by default.",
+            "required": false
+          },
+          "buzzBin": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional path to the buzz binary (default: PATH or BUZZ_BIN).",
+            "required": false
+          },
+          "timeoutMs": {
+            "type": "number",
+            "inputType": "number",
+            "description": "CLI timeout in milliseconds (default 60000).",
+            "required": false,
+            "default": 60000
+          },
+          "agentId": {
+            "type": "string",
+            "inputType": "text",
+            "description": "AGNT agent UUID for identity lookup. Usually injected from chat context automatically.",
+            "required": false
+          }
+        },
+        "outputs": {
+          "success": {
+            "type": "boolean",
+            "description": "Whether the CLI exited 0."
+          },
+          "result": {
+            "type": "object",
+            "description": "Parsed JSON from buzz stdout (sent message event)."
+          },
+          "data": {
+            "type": "object",
+            "description": "Alias of result for chaining."
+          },
+          "channel": {
+            "type": "string",
+            "description": "Channel UUID used."
+          },
+          "replyTo": {
+            "type": "string",
+            "description": "Parent event id if any."
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message when success is false."
+          }
+        }
+      },
+      "title": "Buzz Send Message",
+      "description": "Send a message to a Buzz channel. Supports reply-to (thread) and optional broadcast. Wraps: buzz messages send."
+    },
+    {
+      "type": "buzz-get-messages",
+      "entryPoint": "./buzz-get-messages.js",
+      "schema": {
+        "title": "Buzz Get Messages",
+        "category": "action",
+        "type": "buzz-get-messages",
+        "icon": "inbox",
+        "description": "Fetch recent messages from a Buzz channel. Wraps: buzz messages get.",
+        "parameters": {
+          "channel": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Channel UUID.",
+            "required": true
+          },
+          "limit": {
+            "type": "number",
+            "inputType": "number",
+            "description": "Max messages to return (default 20).",
+            "required": false,
+            "default": 20,
+            "minimum": 1,
+            "maximum": 500
+          },
+          "relayUrl": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Override BUZZ_RELAY_URL.",
+            "required": false
+          },
+          "privateKey": {
+            "type": "string",
+            "inputType": "password",
+            "description": "Escape-hatch nsec override. Prefer per-agent registry (~/.agnt/buzz-identities). Shared BUZZ_PRIVATE_KEY is disabled by default.",
+            "required": false
+          },
+          "buzzBin": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional path to buzz binary.",
+            "required": false
+          },
+          "timeoutMs": {
+            "type": "number",
+            "inputType": "number",
+            "description": "CLI timeout ms.",
+            "required": false,
+            "default": 60000
+          },
+          "agentId": {
+            "type": "string",
+            "inputType": "text",
+            "description": "AGNT agent UUID for identity lookup. Usually injected from chat context automatically.",
+            "required": false
+          }
+        },
+        "outputs": {
+          "success": {
+            "type": "boolean",
+            "description": "Whether the CLI exited 0."
+          },
+          "result": {
+            "type": "array",
+            "description": "Message list (parsed JSON)."
+          },
+          "data": {
+            "type": "array",
+            "description": "Alias of result."
+          },
+          "count": {
+            "type": "number",
+            "description": "Number of messages returned when array."
+          },
+          "channel": {
+            "type": "string",
+            "description": "Channel UUID used."
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message when failed."
+          }
+        }
+      },
+      "title": "Buzz Get Messages",
+      "description": "Fetch recent messages from a Buzz channel. Wraps: buzz messages get."
+    },
+    {
+      "type": "buzz-list-channels",
+      "entryPoint": "./buzz-list-channels.js",
+      "schema": {
+        "title": "Buzz List Channels",
+        "category": "action",
+        "type": "buzz-list-channels",
+        "icon": "list",
+        "description": "List Buzz channels visible to this agent identity. Wraps: buzz channels list.",
+        "parameters": {
+          "relayUrl": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Override BUZZ_RELAY_URL.",
+            "required": false
+          },
+          "privateKey": {
+            "type": "string",
+            "inputType": "password",
+            "description": "Escape-hatch nsec override. Prefer per-agent registry (~/.agnt/buzz-identities). Shared BUZZ_PRIVATE_KEY is disabled by default.",
+            "required": false
+          },
+          "buzzBin": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional path to buzz binary.",
+            "required": false
+          },
+          "timeoutMs": {
+            "type": "number",
+            "inputType": "number",
+            "description": "CLI timeout ms.",
+            "required": false,
+            "default": 60000
+          },
+          "agentId": {
+            "type": "string",
+            "inputType": "text",
+            "description": "AGNT agent UUID for identity lookup. Usually injected from chat context automatically.",
+            "required": false
+          }
+        },
+        "outputs": {
+          "success": {
+            "type": "boolean",
+            "description": "Whether the CLI exited 0."
+          },
+          "result": {
+            "type": "array",
+            "description": "Channel list."
+          },
+          "data": {
+            "type": "array",
+            "description": "Alias of result."
+          },
+          "count": {
+            "type": "number",
+            "description": "Number of channels when array."
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message when failed."
+          }
+        }
+      },
+      "title": "Buzz List Channels",
+      "description": "List Buzz channels visible to this agent identity. Wraps: buzz channels list."
+    },
+    {
+      "type": "buzz-join-channel",
+      "entryPoint": "./buzz-join-channel.js",
+      "schema": {
+        "title": "Buzz Join Channel",
+        "category": "action",
+        "type": "buzz-join-channel",
+        "icon": "log-in",
+        "description": "Join a Buzz channel as the agent identity. Wraps: buzz channels join. Humans can also invite the agent by pubkey.",
+        "parameters": {
+          "channel": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Channel UUID to join.",
+            "required": true
+          },
+          "relayUrl": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Override BUZZ_RELAY_URL.",
+            "required": false
+          },
+          "privateKey": {
+            "type": "string",
+            "inputType": "password",
+            "description": "Escape-hatch nsec override. Prefer per-agent registry (~/.agnt/buzz-identities). Shared BUZZ_PRIVATE_KEY is disabled by default.",
+            "required": false
+          },
+          "buzzBin": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional path to buzz binary.",
+            "required": false
+          },
+          "timeoutMs": {
+            "type": "number",
+            "inputType": "number",
+            "description": "CLI timeout ms.",
+            "required": false,
+            "default": 60000
+          },
+          "agentId": {
+            "type": "string",
+            "inputType": "text",
+            "description": "AGNT agent UUID for identity lookup. Usually injected from chat context automatically.",
+            "required": false
+          }
+        },
+        "outputs": {
+          "success": {
+            "type": "boolean",
+            "description": "Whether the join succeeded."
+          },
+          "result": {
+            "type": "object",
+            "description": "CLI JSON response."
+          },
+          "data": {
+            "type": "object",
+            "description": "Alias of result."
+          },
+          "channel": {
+            "type": "string",
+            "description": "Channel UUID."
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message when failed."
+          }
+        }
+      },
+      "title": "Buzz Join Channel",
+      "description": "Join a Buzz channel as the agent identity. Wraps: buzz channels join. Humans can also invite the agent by pubkey."
+    },
+    {
+      "type": "buzz-create-channel",
+      "entryPoint": "./buzz-create-channel.js",
+      "schema": {
+        "title": "Buzz Create Channel",
+        "category": "action",
+        "type": "buzz-create-channel",
+        "icon": "plus-circle",
+        "description": "Create a new Buzz channel. Wraps: buzz channels create --name --type --visibility.",
+        "parameters": {
+          "name": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Channel display name.",
+            "required": true
+          },
+          "channelType": {
+            "type": "string",
+            "inputType": "select",
+            "description": "Channel type (CLI --type).",
+            "required": false,
+            "default": "stream",
+            "options": [
+              "stream",
+              "forum",
+              "project"
+            ]
+          },
+          "visibility": {
+            "type": "string",
+            "inputType": "select",
+            "description": "Channel visibility.",
+            "required": false,
+            "default": "open",
+            "options": [
+              "open",
+              "private",
+              "closed"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "inputType": "textarea",
+            "description": "Optional channel description (if CLI supports --description).",
+            "required": false
+          },
+          "relayUrl": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Override BUZZ_RELAY_URL.",
+            "required": false
+          },
+          "privateKey": {
+            "type": "string",
+            "inputType": "password",
+            "description": "Escape-hatch nsec override. Prefer per-agent registry (~/.agnt/buzz-identities). Shared BUZZ_PRIVATE_KEY is disabled by default.",
+            "required": false
+          },
+          "buzzBin": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional path to buzz binary.",
+            "required": false
+          },
+          "timeoutMs": {
+            "type": "number",
+            "inputType": "number",
+            "description": "CLI timeout ms.",
+            "required": false,
+            "default": 60000
+          },
+          "agentId": {
+            "type": "string",
+            "inputType": "text",
+            "description": "AGNT agent UUID for identity lookup. Usually injected from chat context automatically.",
+            "required": false
+          }
+        },
+        "outputs": {
+          "success": {
+            "type": "boolean",
+            "description": "Whether create succeeded."
+          },
+          "result": {
+            "type": "object",
+            "description": "Created channel JSON."
+          },
+          "data": {
+            "type": "object",
+            "description": "Alias of result."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name requested."
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message when failed."
+          }
+        }
+      },
+      "title": "Buzz Create Channel",
+      "description": "Create a new Buzz channel. Wraps: buzz channels create --name --type --visibility."
+    },
+    {
+      "type": "buzz-get-thread",
+      "entryPoint": "./buzz-get-thread.js",
+      "schema": {
+        "title": "Buzz Get Thread",
+        "category": "action",
+        "type": "buzz-get-thread",
+        "icon": "git-branch",
+        "description": "Fetch a message thread by root/parent event id. Wraps: buzz messages thread.",
+        "parameters": {
+          "channel": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Channel UUID.",
+            "required": true
+          },
+          "event": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Root or parent event id for the thread.",
+            "required": true
+          },
+          "relayUrl": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Override BUZZ_RELAY_URL.",
+            "required": false
+          },
+          "privateKey": {
+            "type": "string",
+            "inputType": "password",
+            "description": "Escape-hatch nsec override. Prefer per-agent registry (~/.agnt/buzz-identities). Shared BUZZ_PRIVATE_KEY is disabled by default.",
+            "required": false
+          },
+          "buzzBin": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional path to buzz binary.",
+            "required": false
+          },
+          "timeoutMs": {
+            "type": "number",
+            "inputType": "number",
+            "description": "CLI timeout ms.",
+            "required": false,
+            "default": 60000
+          },
+          "agentId": {
+            "type": "string",
+            "inputType": "text",
+            "description": "AGNT agent UUID for identity lookup. Usually injected from chat context automatically.",
+            "required": false
+          }
+        },
+        "outputs": {
+          "success": {
+            "type": "boolean",
+            "description": "Whether the CLI exited 0."
+          },
+          "result": {
+            "type": "object",
+            "description": "Thread payload (messages)."
+          },
+          "data": {
+            "type": "object",
+            "description": "Alias of result."
+          },
+          "channel": {
+            "type": "string",
+            "description": "Channel UUID."
+          },
+          "event": {
+            "type": "string",
+            "description": "Event id requested."
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message when failed."
+          }
+        }
+      },
+      "title": "Buzz Get Thread",
+      "description": "Fetch a message thread by root/parent event id. Wraps: buzz messages thread."
+    },
+    {
+      "type": "buzz-send-diff",
+      "entryPoint": "./buzz-send-diff.js",
+      "schema": {
+        "title": "Buzz Send Diff",
+        "category": "action",
+        "type": "buzz-send-diff",
+        "icon": "file-diff",
+        "description": "Post a unified diff (code patch) to a channel with optional repo/commit metadata. Wraps: buzz messages send-diff.",
+        "parameters": {
+          "channel": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Channel UUID.",
+            "required": true
+          },
+          "diff": {
+            "type": "string",
+            "inputType": "textarea",
+            "description": "Unified diff / patch body.",
+            "required": true
+          },
+          "repo": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional repository URL (e.g. https://github.com/org/repo).",
+            "required": false
+          },
+          "commit": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional commit SHA.",
+            "required": false
+          },
+          "replyTo": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional parent event id.",
+            "required": false
+          },
+          "relayUrl": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Override BUZZ_RELAY_URL.",
+            "required": false
+          },
+          "privateKey": {
+            "type": "string",
+            "inputType": "password",
+            "description": "Escape-hatch nsec override. Prefer per-agent registry (~/.agnt/buzz-identities). Shared BUZZ_PRIVATE_KEY is disabled by default.",
+            "required": false
+          },
+          "buzzBin": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional path to buzz binary.",
+            "required": false
+          },
+          "timeoutMs": {
+            "type": "number",
+            "inputType": "number",
+            "description": "CLI timeout ms.",
+            "required": false,
+            "default": 60000
+          },
+          "agentId": {
+            "type": "string",
+            "inputType": "text",
+            "description": "AGNT agent UUID for identity lookup. Usually injected from chat context automatically.",
+            "required": false
+          }
+        },
+        "outputs": {
+          "success": {
+            "type": "boolean",
+            "description": "Whether the CLI exited 0."
+          },
+          "result": {
+            "type": "object",
+            "description": "Posted diff event JSON."
+          },
+          "data": {
+            "type": "object",
+            "description": "Alias of result."
+          },
+          "channel": {
+            "type": "string",
+            "description": "Channel UUID."
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message when failed."
+          }
+        }
+      },
+      "title": "Buzz Send Diff",
+      "description": "Post a unified diff (code patch) to a channel with optional repo/commit metadata. Wraps: buzz messages send-diff."
+    },
+    {
+      "type": "buzz-whoami",
+      "entryPoint": "./buzz-whoami.js",
+      "schema": {
+        "title": "Buzz Who Am I",
+        "category": "action",
+        "type": "buzz-whoami",
+        "icon": "user",
+        "description": "Return the profile for the agent key (or a given pubkey). Use to discover the agent npub/pubkey for channel invites. Wraps: buzz users get.",
+        "parameters": {
+          "pubkey": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional hex pubkey or npub. Omit to fetch the identity of BUZZ_PRIVATE_KEY.",
+            "required": false
+          },
+          "relayUrl": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Override BUZZ_RELAY_URL.",
+            "required": false
+          },
+          "privateKey": {
+            "type": "string",
+            "inputType": "password",
+            "description": "Escape-hatch nsec override. Prefer per-agent registry (~/.agnt/buzz-identities). Shared BUZZ_PRIVATE_KEY is disabled by default.",
+            "required": false
+          },
+          "buzzBin": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional path to buzz binary.",
+            "required": false
+          },
+          "timeoutMs": {
+            "type": "number",
+            "inputType": "number",
+            "description": "CLI timeout ms.",
+            "required": false,
+            "default": 60000
+          },
+          "agentId": {
+            "type": "string",
+            "inputType": "text",
+            "description": "AGNT agent UUID for identity lookup. Usually injected from chat context automatically.",
+            "required": false
+          }
+        },
+        "outputs": {
+          "success": {
+            "type": "boolean",
+            "description": "Whether the CLI exited 0."
+          },
+          "result": {
+            "type": "object",
+            "description": "User profile JSON."
+          },
+          "data": {
+            "type": "object",
+            "description": "Alias of result."
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message when failed."
+          }
+        }
+      },
+      "title": "Buzz Who Am I",
+      "description": "Return the profile for the agent key (or a given pubkey). Use to discover the agent npub/pubkey for channel invites. Wraps: buzz users get."
+    },
+    {
+      "type": "buzz-provision-identity",
+      "entryPoint": "./buzz-provision-identity.js",
+      "schema": {
+        "title": "Buzz Provision Identity",
+        "category": "action",
+        "type": "buzz-provision-identity",
+        "icon": "key",
+        "description": "Generate a Nostr key for an AGNT agent and register it. Returns PUBLIC key (pubkeyHex, npub) only — never the private key. Use after creating an AGNT agent.",
+        "parameters": {
+          "agentId": {
+            "type": "string",
+            "inputType": "text",
+            "description": "AGNT agent UUID to bind (required unless only listing own — must pass target agent id).",
+            "required": true
+          },
+          "name": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Agent/bot name for the Buzz identity (e.g. SalesBot).",
+            "required": true
+          },
+          "displayName": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional display name (defaults to name).",
+            "required": false
+          },
+          "relayUrl": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Buzz relay URL (default: host BUZZ_RELAY_URL). Can be remote.",
+            "required": false
+          },
+          "inviteGeneral": {
+            "type": "boolean",
+            "inputType": "checkbox",
+            "description": "Try to join the default general channel after keygen.",
+            "required": false,
+            "default": false
+          },
+          "overwrite": {
+            "type": "boolean",
+            "inputType": "checkbox",
+            "description": "Replace existing key for this agentId (dangerous). Default false returns existing public key.",
+            "required": false,
+            "default": false
+          }
+        },
+        "outputs": {
+          "success": {
+            "type": "boolean"
+          },
+          "result": {
+            "type": "object",
+            "description": "Public identity: agentId, pubkeyHex, npub, displayName (no private key)."
+          }
+        }
+      },
+      "title": "Buzz Provision Identity",
+      "description": "Generate a Nostr key for an AGNT agent and register it. Returns PUBLIC key (pubkeyHex, npub) only — never the private key. Use after creating an AGNT agent."
+    },
+    {
+      "type": "buzz-list-identities",
+      "entryPoint": "./buzz-list-identities.js",
+      "schema": {
+        "title": "Buzz List Identities",
+        "category": "action",
+        "type": "buzz-list-identities",
+        "icon": "users",
+        "description": "List all registered per-agent Buzz identities with public keys only (pubkeyHex, npub). Never returns private keys.",
+        "parameters": {
+          "agentId": {
+            "type": "string",
+            "inputType": "text",
+            "description": "AGNT agent UUID (context usually injects for the calling agent).",
+            "required": false
+          },
+          "relayUrl": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional relay override for this call.",
+            "required": false
+          },
+          "privateKey": {
+            "type": "string",
+            "inputType": "password",
+            "description": "Escape-hatch only. Prefer registry. Never needed for provision/list.",
+            "required": false
+          },
+          "buzzBin": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional path to buzz binary.",
+            "required": false
+          },
+          "timeoutMs": {
+            "type": "number",
+            "inputType": "number",
+            "description": "CLI timeout ms (default 60000).",
+            "required": false,
+            "default": 60000
+          }
+        },
+        "outputs": {
+          "success": {
+            "type": "boolean"
+          },
+          "result": {
+            "type": "object",
+            "description": "agents[] with public fields only"
+          }
+        }
+      },
+      "title": "Buzz List Identities",
+      "description": "List all registered per-agent Buzz identities with public keys only (pubkeyHex, npub). Never returns private keys."
+    }
+  ],
+  "permissions": {
+    "capabilities": [
+      "spawn-process",
+      "network",
+      "filesystem",
+      "env-access"
+    ],
+    "domains": []
+  },
+  "instructions": "AFTER INSTALL: (1) Install buzz CLI on AGNT host. (2) Set BUZZ_RELAY_URL + BUZZ_BIN. (3) Create AGNT agent, copy UUID. (4) buzz-provision-identity (public key only). (5) CLOSED RELAY: on Buzz host run: cd ~/.buzz/deploy/compose && ./run.sh add-member <npub-or-hex> && ./run.sh list-members. (6) Channel join / add-member. (7) Assign buzz_* tools; chat via Agents → that agent. Guide: docs/CONNECT-ANY-AGENT.md",
+  "displayName": "Buzz for AGNT",
+  "license": "MIT",
+  "repository": "https://github.com/block/buzz",
+  "keywords": [
+    "buzz",
+    "nostr",
+    "chat",
+    "messaging",
+    "agent",
+    "block",
+    "team-communication",
+    "cli",
+    "real-time"
+  ]
+}
