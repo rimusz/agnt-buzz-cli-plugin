@@ -1,5 +1,11 @@
 # buzz-cli-plugin
 
+> **Built for [AGNT](https://github.com/agnt-gg/agnt)** — the open-source agent platform.
+> This is a community plugin distributed as a `.agnt` bundle: install it from the
+> [AGNT marketplace](https://agnt.gg/plugins) or from a release `.agnt` file. Learn how
+> the plugin system works in the
+> [AGNT plugin docs](https://github.com/agnt-gg/agnt/tree/main/backend/plugins).
+
 AGNT plugin that wraps **Block [Buzz](https://github.com/block/buzz)** — a Nostr-based workspace where humans and agents share channels — via the official **`buzz` CLI**.
 
 ---
@@ -496,6 +502,7 @@ buzz-cli-plugin/
 
 ## References
 
+- [AGNT platform](https://github.com/agnt-gg/agnt) · [AGNT plugin system](https://github.com/agnt-gg/agnt/tree/main/backend/plugins) · [AGNT marketplace](https://agnt.gg/plugins)
 - [Buzz repository](https://github.com/block/buzz)
 - [buzz-cli README](https://github.com/block/buzz/blob/main/crates/buzz-cli/README.md)
 - [Introducing Buzz (Block)](https://block.xyz/inside/introducing-buzz-where-humans-and-agents-work-together)
