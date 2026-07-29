@@ -15,8 +15,14 @@ class BuzzListIdentities {
     try {
       mergeParams(params, inputData, workflowEngine); // context ok even if unused
       const data = listPublicIdentities();
+      const attention =
+        data.needsAttention && data.needsAttention.length
+          ? ` ${data.needsAttention.length} need attention.`
+          : '';
       return successResult(data, {
-        message: `${data.count} Buzz identit${data.count === 1 ? 'y' : 'ies'} registered (public keys only).`,
+        message:
+          `${data.count} Buzz identit${data.count === 1 ? 'y' : 'ies'} registered ` +
+          `(${data.okCount} ok).${attention} Public keys only.`,
       });
     } catch (error) {
       console.error('[buzz-list-identities]', error);

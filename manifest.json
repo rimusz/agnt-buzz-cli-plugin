@@ -1,6 +1,6 @@
 {
   "name": "buzz-cli-plugin",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "Buzz (Block Nostr workspace) via official buzz CLI. After install: set BUZZ_RELAY_URL + BUZZ_BIN, create AGNT agent, provision identity (tool buzz-provision-identity or script), assign buzz_* tools. See docs/CONNECT-ANY-AGENT.md. Per-agent keys; tools never return private keys. Optional real-time listener companion (listener/) makes the agent auto-reply to DMs/mentions in ~3s.",
   "author": "AGNT",
   "icon": "message-square",
@@ -257,6 +257,57 @@
       },
       "title": "Buzz List Channels",
       "description": "List Buzz channels visible to this agent identity. Wraps: buzz channels list."
+    },
+    {
+      "type": "buzz-check-membership",
+      "entryPoint": "./buzz-check-membership.js",
+      "title": "Buzz Check Membership",
+      "description": "Check whether the agent is a member of a channel, or list membership status across channels.",
+      "schema": {
+        "title": "Buzz Check Membership",
+        "category": "action",
+        "type": "buzz-check-membership",
+        "icon": "user-check",
+        "description": "Check whether the current agent identity is a member of a given channel, or list membership status across all channels. Wraps: buzz channels list.",
+        "parameters": {
+          "channel": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Channel UUID to check. Omit to list status across all channels.",
+            "required": false
+          },
+          "allChannels": {
+            "type": "boolean",
+            "inputType": "checkbox",
+            "description": "Return the full status map even when a channel is given.",
+            "required": false
+          },
+          "relayUrl": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Override BUZZ_RELAY_URL for this call.",
+            "required": false
+          },
+          "privateKey": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Override the agent private key for this call.",
+            "required": false
+          },
+          "buzzBin": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Override the buzz binary path.",
+            "required": false
+          },
+          "timeoutMs": {
+            "type": "number",
+            "inputType": "number",
+            "description": "CLI timeout in ms (default 60000).",
+            "required": false
+          }
+        }
+      }
     },
     {
       "type": "buzz-join-channel",
@@ -521,6 +572,75 @@
       "description": "Fetch a message thread by root/parent event id. Wraps: buzz messages thread."
     },
     {
+      "type": "buzz-search",
+      "entryPoint": "./buzz-search.js",
+      "title": "Buzz Search",
+      "description": "Full-text search across Buzz messages. Wraps: buzz messages search.",
+      "schema": {
+        "title": "Buzz Search",
+        "category": "action",
+        "type": "buzz-search",
+        "icon": "search",
+        "description": "Full-text search across Buzz messages, optionally filtered by channel, author, or since-time. Wraps: buzz messages search.",
+        "parameters": {
+          "query": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Search query (full-text).",
+            "required": true
+          },
+          "channel": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional channel UUID to scope the search.",
+            "required": false
+          },
+          "author": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional author pubkey (hex) to filter by.",
+            "required": false
+          },
+          "since": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Optional lower time bound (ISO-8601 or unix seconds).",
+            "required": false
+          },
+          "limit": {
+            "type": "number",
+            "inputType": "number",
+            "description": "Max results (default 20).",
+            "required": false
+          },
+          "relayUrl": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Override BUZZ_RELAY_URL for this call.",
+            "required": false
+          },
+          "privateKey": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Override the agent private key for this call.",
+            "required": false
+          },
+          "buzzBin": {
+            "type": "string",
+            "inputType": "text",
+            "description": "Override the buzz binary path.",
+            "required": false
+          },
+          "timeoutMs": {
+            "type": "number",
+            "inputType": "number",
+            "description": "CLI timeout in ms (default 60000).",
+            "required": false
+          }
+        }
+      }
+    },
+    {
       "type": "buzz-send-diff",
       "entryPoint": "./buzz-send-diff.js",
       "schema": {
@@ -696,7 +816,7 @@
         "category": "action",
         "type": "buzz-provision-identity",
         "icon": "key",
-        "description": "Generate a Nostr key for an AGNT agent and register it. Returns PUBLIC key (pubkeyHex, npub) only — never the private key. Use after creating an AGNT agent.",
+        "description": "Generate, report, or rotate a per-agent Buzz (Nostr) identity. Returns PUBLIC keys only (npub + hex) — never the private key. Set rotate:true to safely rotate an existing identity.",
         "parameters": {
           "agentId": {
             "type": "string",
@@ -735,6 +855,12 @@
             "description": "Replace existing key for this agentId (dangerous). Default false returns existing public key.",
             "required": false,
             "default": false
+          },
+          "rotate": {
+            "type": "boolean",
+            "inputType": "checkbox",
+            "description": "Safely rotate: archive the old key and generate a fresh keypair for this agent. The new pubkey must be re-added to closed relays.",
+            "required": false
           }
         },
         "outputs": {

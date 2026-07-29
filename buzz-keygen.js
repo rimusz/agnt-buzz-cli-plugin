@@ -242,12 +242,20 @@ export function provisionAgentIdentity(opts = {}) {
     fs.chmodSync(keyPath, 0o600);
   }
 
-  // Best-effort profile + whoami for pubkey
+  // Best-effort profile + whoami for pubkey. Attempt to flag the identity as a
+  // bot (bot:true) — relays that don't support it will ignore the extra arg.
   const about = `AGNT agent "${name}" — unique Buzz identity (per-agent nsec).`;
-  runBuzz(['users', 'set-profile', '--display-name', displayName, '--about', about], {
+  const profileArgs = ['users', 'set-profile', '--display-name', displayName, '--about', about];
+  const botProfile = runBuzz([...profileArgs, '--bot'], {
     BUZZ_PRIVATE_KEY: privMaterial,
     BUZZ_RELAY_URL: relay,
   });
+  let botFlagged = botProfile.exit === 0;
+  if (botProfile.exit !== 0) {
+    // relay/CLI rejected --bot; fall back to a plain profile so it still works
+    runBuzz(profileArgs, { BUZZ_PRIVATE_KEY: privMaterial, BUZZ_RELAY_URL: relay });
+    botFlagged = false;
+  }
 
   const who = runBuzz(['users', 'get'], {
     BUZZ_PRIVATE_KEY: privMaterial,
@@ -307,11 +315,13 @@ export function provisionAgentIdentity(opts = {}) {
   return {
     created: true,
     alreadyExists: false,
+    rotated: !!opts._rotated,
     agentId,
     agentName: name,
     displayName,
     pubkeyHex: pubHex,
     npub: npub || (pubHex ? encodeNpub(pubHex) : null),
+    botFlagged,
     keyPath,
     identityCard: cardPath,
     relayUrl: relay,
@@ -322,24 +332,91 @@ export function provisionAgentIdentity(opts = {}) {
   };
 }
 
-/** Public-only list of registered identities */
+/**
+ * Safely ROTATE an existing agent's identity: archive the current key, then
+ * generate a fresh keypair for the same agentId. The old key is backed up (not
+ * deleted) so it can be recovered if needed. Returns PUBLIC metadata only.
+ *
+ * @param {object} opts { agentId, name?, displayName?, relayUrl?, inviteGeneral? }
+ */
+export function rotateAgentIdentity(opts = {}) {
+  const agentId = String(opts.agentId || '').trim();
+  if (!agentId) throw new Error('agentId is required for rotation');
+
+  const reg = loadRegistry();
+  const existing = reg.agents[agentId];
+  const keyPath = path.join(keysDir(), `${agentId}.key`);
+  const currentKeyPath = existing?.keyPath || keyPath;
+
+  // Archive the current key (if present) before overwriting.
+  let archivedTo = null;
+  if (fs.existsSync(currentKeyPath)) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    archivedTo = `${currentKeyPath}.rotated-${stamp}.bak`;
+    fs.copyFileSync(currentKeyPath, archivedTo);
+    try { fs.chmodSync(archivedTo, 0o600); } catch { /* ignore */ }
+  }
+
+  // Re-provision with overwrite (fresh keypair), preserving name/displayName.
+  const result = provisionAgentIdentity({
+    agentId,
+    name: (opts.name || existing?.agentName || agentId),
+    displayName: opts.displayName || existing?.displayName || undefined,
+    relayUrl: opts.relayUrl || existing?.relayUrl || undefined,
+    inviteGeneral: opts.inviteGeneral === true,
+    overwrite: true,
+    _rotated: true,
+  });
+
+  return {
+    ...result,
+    rotated: true,
+    archivedKey: archivedTo,
+    note:
+      'Identity ROTATED. Old key archived (not deleted). The NEW pubkey/npub must be ' +
+      're-added to any closed relay (add-member) — old membership does not carry over.',
+  };
+}
+
+/**
+ * Public-only list of registered identities, each with basic health STATUS:
+ *   - hasKey:      the key file exists on disk
+ *   - hasPubkey:   a public key is recorded
+ *   - provisioned: fully provisioned (key file + pubkey present)
+ *   - status:      'ok' | 'missing_key' | 'incomplete'
+ */
 export function listPublicIdentities() {
   const reg = loadRegistry();
-  const agents = Object.entries(reg.agents || {}).map(([id, e]) => ({
-    agentId: id,
-    agentName: e.agentName || null,
-    displayName: e.displayName || null,
-    pubkeyHex: e.pubkeyHex || null,
-    npub: e.pubkeyHex ? encodeNpub(e.pubkeyHex) : null,
-    relayUrl: e.relayUrl || null,
-    keyPath: e.keyPath || null,
-    createdAt: e.createdAt || null,
-  }));
+  const agents = Object.entries(reg.agents || {}).map(([id, e]) => {
+    const keyPath = e.keyPath || null;
+    const hasKey = !!(keyPath && fs.existsSync(keyPath));
+    const hasPubkey = !!e.pubkeyHex;
+    const provisioned = hasKey && hasPubkey;
+    const status = !hasKey ? 'missing_key' : !hasPubkey ? 'incomplete' : 'ok';
+    return {
+      agentId: id,
+      agentName: e.agentName || null,
+      displayName: e.displayName || null,
+      pubkeyHex: e.pubkeyHex || null,
+      npub: e.pubkeyHex ? encodeNpub(e.pubkeyHex) : null,
+      relayUrl: e.relayUrl || null,
+      keyPath,
+      createdAt: e.createdAt || null,
+      updatedAt: e.updatedAt || null,
+      // status
+      hasKey,
+      hasPubkey,
+      provisioned,
+      status,
+    };
+  });
   return {
     allowSharedEnvKey: reg.allowSharedEnvKey === true,
     requireAgentIdentity: reg.requireAgentIdentity !== false,
     registry: registryPath(),
     count: agents.length,
+    okCount: agents.filter((a) => a.status === 'ok').length,
+    needsAttention: agents.filter((a) => a.status !== 'ok').map((a) => a.agentId),
     agents,
   };
 }

@@ -1,5 +1,46 @@
 # Changelog
 
+## [1.5.0] - 2026-07-29
+
+### Added
+- **New tool `buzz-check-membership`** — check whether the agent is a member of a
+  channel, or list membership status across all channels.
+- **Identity rotation** — `buzz-provision-identity` now supports `rotate:true`:
+  safely archives the old key and generates a fresh keypair for an existing agent
+  (new pubkey must be re-added to closed relays). Provision results now surface both
+  `npub` and `hexPubkey` explicitly, and attempt to set `bot:true` on the profile
+  (ignored gracefully if the relay rejects it).
+- **Identity status** — `buzz-list-identities` now reports per-identity status
+  (`hasKey`, `provisioned`, `status`) plus an `okCount` / `needsAttention` summary.
+- **Side-channel closed-loop helpers** — `listener/sidechannel.js` + skill
+  `skills/buzz-sidechannel` make the "create side-channel → do work → summarize back
+  to the thread with replyTo → clean up" pattern easy for agents.
+
+
+## [1.4.0] - 2026-07-29
+
+### Added
+- **Listener → rich AGNT Goals (auto mode).** Incoming @mentions / #p-tagged
+  messages can now create a fully-briefed AGNT Goal (title, full request, channel
+  id+name, replyTo event id, thread root, author, timestamp, last 8-12 messages of
+  context, and an explicit "reply in-thread via buzz-send-message with replyTo"
+  instruction) and run it autonomously. New `listener/goal-creator.js`.
+  `config.replyMode`: `auto` (default; quick streamed ack + background Goal for
+  substantive requests) | `stream` | `goal`. Resilient: Goal creation retries with
+  exponential backoff if the AGNT backend is temporarily down.
+- **Mention detection.** Plain-text name/alias mentions (`agentName`/`agentAliases`,
+  case-insensitive) are detected in addition to #p tags; the trigger method is
+  logged and attached to the intent. `requireMention` gates ambient chatter.
+- **New tool `buzz-search`** — full-text search across messages
+  (`query` + optional `channel`/`author`/`since`/`limit`). Wraps `buzz messages search`.
+
+### Changed
+- **Structured, agent-friendly errors.** `buzz-common.js` now maps CLI exit codes
+  to `{ errorCategory, hint, retryable }` and propagates them through every tool.
+  Exit 2 (network) returns explicit BUZZ_RELAY_URL / public-hostname-vs-localhost /
+  Host-header guidance.
+
+
 ## [1.3.1] - 2026-07-28
 
 ### Added

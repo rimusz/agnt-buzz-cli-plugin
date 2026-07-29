@@ -17,13 +17,44 @@ import { resolveIdentity } from './buzz-identity.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const EXIT_HINTS = {
-  1: 'User/input error (bad args, validation)',
-  2: 'Network error (relay unreachable or timed out)',
-  3: 'Auth error (missing/invalid BUZZ_PRIVATE_KEY or NIP-98 signature rejected)',
-  4: 'Other CLI/relay error',
-  5: 'Write conflict (memory patch / concurrent write)',
+// Exit-code -> structured, agent-friendly categorization.
+//   category: machine-readable class
+//   hint:     actionable guidance for the agent
+//   retryable: whether a transient retry makes sense
+export const EXIT_INFO = {
+  0: { category: 'ok', hint: null, retryable: false },
+  1: {
+    category: 'user_input',
+    hint: 'Input/validation error. Check arguments, UUIDs, and required fields.',
+    retryable: false,
+  },
+  2: {
+    category: 'network',
+    hint:
+      'Relay unreachable, timed out, or host/origin mismatch. Check BUZZ_RELAY_URL — it must be the PUBLIC hostname that opens Buzz from THIS machine (NOT localhost/127.0.0.1 if the relay enforces its origin/Host header). Verify the relay is running and network-reachable.',
+    retryable: true,
+  },
+  3: {
+    category: 'auth',
+    hint:
+      'Authentication/key problem. Check BUZZ_PRIVATE_KEY / the per-agent identity, that the key is valid, and that the key is a MEMBER of the relay (closed relays require add-member).',
+    retryable: false,
+  },
+  4: { category: 'other', hint: 'Unexpected CLI/relay error. Inspect stderr for details.', retryable: false },
+  5: { category: 'write_conflict', hint: 'Concurrent write/edit conflict — retry the operation.', retryable: true },
 };
+
+// Back-compat: short one-line hint per exit code (used in error message text).
+const EXIT_HINTS = Object.fromEntries(
+  Object.entries(EXIT_INFO)
+    .filter(([code]) => Number(code) !== 0)
+    .map(([code, info]) => [Number(code), info.hint])
+);
+
+/** Look up the structured category/hint/retryable for a CLI exit code. */
+export function classifyExit(code) {
+  return EXIT_INFO[code] || { category: 'other', hint: EXIT_INFO[4].hint, retryable: false };
+}
 
 /**
  * Resolve path to the `buzz` binary.
@@ -327,14 +358,35 @@ export function successResult(result, extras = {}) {
   };
 }
 
+/**
+ * Build a structured, agent-friendly error result.
+ *
+ * When called with { exitCode } (as every tool does after a failed runBuzz),
+ * it enriches the result with a machine-readable `errorCategory`, an actionable
+ * `hint`, and a `retryable` flag derived from the CLI exit code. This is how
+ * exit-code semantics (esp. exit 2 = network / relay-URL guidance) propagate to
+ * every tool uniformly.
+ */
 export function errorResult(error, extras = {}) {
-  return {
+  const message = typeof error === 'string' ? error : error?.message || String(error);
+  const out = {
     success: false,
     result: null,
     data: null,
-    error: typeof error === 'string' ? error : error?.message || String(error),
+    error: message,
     ...extras,
   };
+
+  // Enrich from the exit code when present (and not already provided).
+  if (out.exitCode !== undefined && out.exitCode !== null) {
+    const info = classifyExit(out.exitCode);
+    if (out.errorCategory === undefined) out.errorCategory = info.category;
+    if (out.hint === undefined && info.hint) out.hint = info.hint;
+    if (out.retryable === undefined) out.retryable = !!info.retryable;
+  } else if (out.errorCategory === undefined) {
+    out.errorCategory = 'error';
+  }
+  return out;
 }
 
 export { __dirname };

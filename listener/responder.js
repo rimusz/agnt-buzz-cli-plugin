@@ -1,18 +1,18 @@
 /**
- * responder.js -- Deliverable #1: STREAMING replies.
+ * responder.js -- reply generation for the Buzz listener.
  *
- * Consumes a reply-intent from handler.js and produces a live "typing" effect in
- * Buzz by:
- *   1. Immediately sending a placeholder message ("...") via `buzz messages send`
- *      (reply-to the triggering event, so it threads correctly).
- *   2. Streaming tokens from AGNT's /orchestrator/chat SSE endpoint (same call the
- *      poller used, but consumed incrementally).
- *   3. Throttle-editing the placeholder (`buzz messages edit`) every ~editIntervalMs
- *      with the accumulated text -> the message visibly fills in.
- *   4. One final edit with the complete reply.
+ * SINGLE-SEND design (no placeholder, no edit-to-replace):
+ *   1. Generate the COMPLETE answer from AGNT's /orchestrator/chat SSE endpoint
+ *      (consumed fully; the SSE is still parsed the poller's way so reasoning
+ *      never leaks and text never doubles).
+ *   2. Send it EXACTLY ONCE, threaded to the original message (reply-to).
+ *   3. On generation failure or an empty answer, send NOTHING.
  *
- * Fallback: if `messages edit` errors (e.g. write conflict / rate limit, exit 5),
- * we stop editing and just do a single final send-or-edit at the end (Option B).
+ * Why not the old placeholder-then-edit "typing" effect: posting a "…" first and
+ * editing it into the answer left an orphaned "…" whenever the edit didn't land
+ * (backend blip, exit-5 write conflict, provider hiccup) -- the root cause of the
+ * repeated "ack, then silence" failures. Single-send either delivers a complete
+ * answer or nothing; it never leaves a dangling placeholder.
  *
  * Reuses the poller's proven patterns: the AGNT SSE body shape, the buzz CLI
  * spawn, exit-code semantics.
@@ -40,6 +40,15 @@ Rules:
 - Be warm and useful.
 - Never reveal private keys.
 - If they just say hi, greet back and offer help.`;
+
+// Ack persona for 'auto' mode: a short acknowledgement while a background Goal
+// does the real work and posts the full answer as a follow-up.
+const ACK_SYSTEM_PROMPT = `You are a helpful Buzz teammate (an AGNT agent). The user sent a request that you are now working on in the background.
+Reply with ONE short sentence acknowledging the request and saying you're on it — no more.
+Rules:
+- Reply ONLY with the message text (no quotes, no name prefix, no tool calls).
+- 1 short sentence, warm and specific to their ask if possible.
+- Do NOT attempt to answer the request itself here.`;
 
 export class Responder {
   /**
@@ -83,84 +92,63 @@ export class Responder {
   }
 
   async _respondInner(intent) {
-    // 1. placeholder send (threaded reply)
-    const sent = this._runBuzz([
-      'messages', 'send',
-      '--channel', intent.channelId,
-      '--content', this.cfg.placeholder,
-      ...(intent.eventId ? ['--reply-to', intent.eventId] : []),
-    ]);
-    if (sent.exit !== 0) {
-      this._log('responder: placeholder send failed: ' + (sent.stderr || sent.stdout));
+    // SINGLE-SEND design (no placeholder, no edit-to-replace).
+    //
+    // The old placeholder-then-edit pattern posted a "…" first and then edited
+    // it into the answer. When the edit didn't land (backend blip, exit-5 write
+    // conflict, provider hiccup) it left an orphaned "…" and the real answer
+    // either never appeared or came as a separate message. That was the root of
+    // the repeated "ack, then silence" failures.
+    //
+    // Now: generate the COMPLETE answer first, then send it EXACTLY ONCE. If
+    // generation fails, we send NOTHING (never a dangling "…"). No edits, no
+    // placeholder, no orphans.
+    let finalClean;
+    try {
+      finalClean = await this._streamFromAgnt(intent, () => {}); // no live edits
+    } catch (err) {
+      this._log('responder: generation failed (' + err.message + '); sending nothing (no orphan placeholder)');
       return;
     }
-    const sentBody = this._parseJson(sent.stdout, {});
-    const msgEventId = sentBody.event_id || sentBody.id || null;
-    if (!msgEventId) {
-      this._log('responder: no event_id from send; falling back to single-shot');
-      return this._singleShot(intent);
+
+    const text = (finalClean || '').trim().slice(0, this.cfg.maxReplyLen);
+    if (!text) {
+      this._log('responder: empty answer; sending nothing');
+      return;
     }
 
-    // 2. stream + throttle-edit. onDelta gives (delta, fullSnapshot); we edit
-    //    with the SANITIZED cumulative snapshot so the fill-in never shows
-    //    leaked reasoning, and never doubles.
-    let lastEditText = this.cfg.placeholder;
-    let lastEditAt = 0;
-    let editingDisabled = false;
-
-    const flushEdit = (snapshot, force) => {
-      if (editingDisabled) return;
-      const clean = this.sanitizeReply(snapshot).slice(0, this.cfg.maxReplyLen);
-      if (!clean.trim() || clean === lastEditText) return;
-      const now = Date.now();
-      const grew = clean.length - lastEditText.length;
-      const dueByTime = now - lastEditAt >= this.cfg.editIntervalMs;
-      const dueBySize = grew >= this.cfg.minCharsPerEdit;
-      if (!force && !(dueByTime && dueBySize)) return;
-      const ed = this._runBuzz([
-        'messages', 'edit',
-        '--event', msgEventId,
-        '--content', clean,
-      ]);
-      if (ed.exit !== 0) {
-        this._log('responder: edit exit=' + ed.exit + ' -> disabling live edits (' + (ed.stderr || '').slice(0, 80) + ')');
-        editingDisabled = true;
-        return;
-      }
-      lastEditText = clean;
-      lastEditAt = now;
-    };
-
-    // _streamFromAgnt returns the fully-assembled SANITIZED final text.
-    const finalClean = await this._streamFromAgnt(intent, (delta, snapshot) => {
-      flushEdit(snapshot, false);
-    });
-
-    // 3. final edit with the authoritative sanitized reply
-    const finalText = (finalClean || 'On it.').slice(0, this.cfg.maxReplyLen);
-    const finalEd = this._runBuzz([
-      'messages', 'edit',
-      '--event', msgEventId,
-      '--content', finalText,
-    ]);
-    if (finalEd.exit !== 0) {
-      this._log('responder: final edit failed exit=' + finalEd.exit + ': ' + (finalEd.stderr || finalEd.stdout));
+    // One clean send, threaded to the original message.
+    const sent = this._sendWithRetry(intent, text);
+    if (sent.exit === 0) {
+      this._log('responder: replied (single-send) to ' + intent.author + ' len=' + text.length);
     } else {
-      this._log('responder: replied (streamed) to ' + intent.author + ' len=' + finalText.length);
+      this._log('responder: send failed exit=' + sent.exit + ': ' + (sent.stderr || sent.stdout).slice(0, 120));
     }
   }
 
-  /** Option B fallback: generate fully, then one send. */
-  async _singleShot(intent) {
-    const finalClean = await this._streamFromAgnt(intent, () => {});
-    const text = (finalClean || 'On it.').slice(0, this.cfg.maxReplyLen);
-    const sent = this._runBuzz([
-      'messages', 'send',
-      '--channel', intent.channelId,
-      '--content', text,
-      ...(intent.eventId ? ['--reply-to', intent.eventId] : []),
-    ]);
-    this._log('responder: single-shot ' + (sent.exit === 0 ? 'ok' : 'FAIL ' + sent.stderr));
+  /**
+   * Send one message, threaded. Retries a couple of times on a transient
+   * failure (exit 2 network / exit 5 write conflict) so a brief blip doesn't
+   * drop the whole reply. Never posts a placeholder.
+   */
+  _sendWithRetry(intent, text, attempts = 3) {
+    let last = { exit: 4, stdout: '', stderr: '' };
+    for (let i = 0; i < attempts; i++) {
+      last = this._runBuzz([
+        'messages', 'send',
+        '--channel', intent.channelId,
+        '--content', text,
+        ...(intent.eventId ? ['--reply-to', intent.eventId] : []),
+      ]);
+      if (last.exit === 0) return last;
+      // only retry transient classes
+      if (last.exit !== 2 && last.exit !== 5) return last;
+      this._log('responder: send exit=' + last.exit + ' (transient), retry ' + (i + 1) + '/' + (attempts - 1));
+      // small backoff
+      const until = Date.now() + 800 * (i + 1);
+      while (Date.now() < until) { /* spin-wait: keep it simple + synchronous with spawnSync */ }
+    }
+    return last;
   }
 
   // -------------------------------------------------------------------------
@@ -169,7 +157,10 @@ export class Responder {
   // -------------------------------------------------------------------------
   async _streamFromAgnt(intent, onDelta) {
     const channelName = intent.channelId.startsWith('dm:') ? 'DM' : 'channel';
-    const systemish = (this.cfg.systemPrompt || DEFAULT_SYSTEM_PROMPT).replace('{CHANNEL}', channelName);
+    const basePrompt = intent._ackOnly
+      ? ACK_SYSTEM_PROMPT
+      : (this.cfg.systemPrompt || DEFAULT_SYSTEM_PROMPT);
+    const systemish = basePrompt.replace('{CHANNEL}', channelName);
     const threadLines = (intent.thread || [])
       .slice(-8)
       .map((m) => m.author + ': ' + m.content)
