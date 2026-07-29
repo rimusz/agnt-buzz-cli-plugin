@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.4.1] - 2026-07-29
+
+### Fixed
+- **Autonomous goal replies no longer stall under load.** The listener's calls to
+  the AGNT backend (goal poll / create) used a 20s abort timeout that could fire
+  during busy goal execution, causing the answer to never post back (request
+  acknowledged, then silence). Timeout raised to 45s, and abort/network errors in
+  the poll loop are now treated as transient with a bounded consecutive-failure
+  counter (gives up gracefully only after 8 straight failures instead of
+  looping silently to the 4-min deadline).
+
+### Changed
+- goal-creator.js emits step-by-step logging (step[create] -> step[created] ->
+  step[launch] -> step[poll cycle N status/tasks] -> step[extract] -> step[posted])
+  for full observability of the goal reply path.
+- config.template.json ships goalProvider="GrokAI"/goalModel="grok-4.5" as a
+  belt-and-suspenders default so goals don't inherit a usage-capped provider.
+
+
 ## [1.5.0] - 2026-07-29
 
 ### Added

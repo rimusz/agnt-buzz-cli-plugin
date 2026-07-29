@@ -1,6 +1,6 @@
 {
   "name": "buzz-cli-plugin",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "type": "module",
   "description": "Buzz (Block Nostr workspace) via official buzz CLI. After install: set BUZZ_RELAY_URL + BUZZ_BIN, create an AGNT agent, run scripts/provision-agent-identity.js, assign buzz_* tools. See docs/CONNECT-ANY-AGENT.md. Per-agent keys (no shared identity by default).",
   "main": "buzz-common.js",

@@ -38,7 +38,8 @@ const DEFAULTS = {
   baseBackoffMs: 2000,
   maxBackoffMs: 60000,
   agentName: 'the agent', // used in instructions / title
-  requestTimeoutMs: 20000,
+  requestTimeoutMs: 45000, // AGNT backend can be busy during goal execution; 45s before abort
+  maxConsecutivePollFailures: 8, // give up polling only after this many straight fetch failures
   // Option B: the LISTENER owns the post-back. After launching the goal, poll it
   // to completion, extract the final answer, and post it to the Buzz thread
   // ourselves (we have working relay creds). This removes the dependency on the
@@ -77,6 +78,8 @@ export class GoalCreator {
 
   /** Public entry: create a Goal for this intent (queues + retries on failure). */
   async createGoal(intent) {
+    this._log('goal-creator: step[create] goal for event ' + String(intent.eventId).slice(0, 10) +
+      ' from ' + intent.author);
     try {
       await this._attempt(intent, 0);
     } catch (err) {
@@ -122,15 +125,16 @@ export class GoalCreator {
       created?.data?.goal?.goalId ||
       created?.data?.goalId;
     if (!goalId) throw new Error('no goal id in create response');
-    this._log('goal-creator: created goal ' + goalId + ' "' + title.slice(0, 48) + '"');
+    this._log('goal-creator: step[created] goalId=' + goalId + ' "' + title.slice(0, 48) + '"');
 
     // 4. launch autonomous execution
+    this._log('goal-creator: step[launch] execute-autonomous provider=' +
+      (this.cfg.provider || 'default') + '/' + (this.cfg.model || 'default'));
     await this._post('/goals/' + goalId + '/execute-autonomous', {
       maxIterations: this.cfg.maxIterations,
       ...(this.cfg.provider ? { provider: this.cfg.provider } : {}),
       ...(this.cfg.model ? { model: this.cfg.model } : {}),
     });
-    this._log('goal-creator: launched autonomous execution for goal ' + goalId);
 
     // 5. Option B: poll to completion + post the answer back ourselves (the
     //    listener has working Buzz creds; the autonomous agent may not). Runs in
@@ -147,23 +151,41 @@ export class GoalCreator {
   // Option B: poll goal -> extract answer -> post back to the Buzz thread
   // -------------------------------------------------------------------------
   async _pollAndPostBack(goalId, intent) {
+    this._log('goal-creator: step[launched] polling goal ' + goalId + ' (every ' + this.cfg.pollIntervalMs + 'ms, max ' + this.cfg.pollMaxMs + 'ms)');
     const deadline = Date.now() + this.cfg.pollMaxMs;
     let goal = null;
     let ready = false;
+    let cycle = 0;
+    let consecutiveFailures = 0;
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, this.cfg.pollIntervalMs));
+      cycle++;
       let d;
       try {
         d = await this._get('/goals/' + goalId);
+        consecutiveFailures = 0; // a success resets the transient-failure counter
       } catch (err) {
-        continue; // transient; keep polling
+        // Aborts / network blips are transient -- keep polling, but bound it so a
+        // persistently-unreachable backend doesn't loop silently to the deadline.
+        consecutiveFailures++;
+        this._log('goal-creator: step[poll] cycle ' + cycle + ' transient error ' +
+          consecutiveFailures + '/' + this.cfg.maxConsecutivePollFailures + ': ' + err.message);
+        if (consecutiveFailures >= this.cfg.maxConsecutivePollFailures) {
+          this._log('goal-creator: step[giveup] goal ' + goalId + ' backend unreachable after ' +
+            consecutiveFailures + ' straight failures; no post-back');
+          return;
+        }
+        continue;
       }
       goal = d?.goal || d;
       const status = goal?.status;
       const tasks = Array.isArray(goal?.tasks) ? goal.tasks : [];
+      const taskStates = tasks.map((t) => t.status).join(',');
       const allTasksDone =
         tasks.length > 0 &&
         tasks.every((t) => ['completed', 'failed', 'skipped'].includes(t.status));
+      this._log('goal-creator: step[poll] cycle ' + cycle + ' status=' + status +
+        ' tasks=[' + taskStates + '] allDone=' + allTasksDone);
       // Post back as soon as the goal is terminal OR all tasks are done (the goal
       // status doesn't always flip to a terminal value even when tasks finish).
       if (['validated', 'completed', 'failed', 'needs_review'].includes(status) || allTasksDone) {
@@ -172,15 +194,16 @@ export class GoalCreator {
       }
     }
     if (!goal || !ready) {
-      this._log('goal-creator: goal ' + goalId + ' did not complete in time; no post-back');
+      this._log('goal-creator: step[giveup] goal ' + goalId + ' did not complete in time; no post-back');
       return;
     }
 
     const answer = this._extractAnswer(goal);
     if (!answer) {
-      this._log('goal-creator: goal ' + goalId + ' produced no usable answer; no post-back');
+      this._log('goal-creator: step[extract] goal ' + goalId + ' produced no usable answer; no post-back');
       return;
     }
+    this._log('goal-creator: step[extract] answer len=' + answer.length);
 
     // Post the answer back to the original thread using OUR working relay creds.
     const sent = this._runBuzz([
@@ -190,10 +213,10 @@ export class GoalCreator {
       ...(intent.eventId ? ['--reply-to', String(intent.eventId)] : []),
     ]);
     if (sent.exit === 0) {
-      this._log('goal-creator: posted goal answer to ' + intent.channelId.slice(0, 8) +
-        ' (replyTo=' + String(intent.eventId).slice(0, 10) + ', len=' + answer.length + ')');
+      this._log('goal-creator: step[posted] to ' + intent.channelId.slice(0, 8) +
+        ' replyTo=' + String(intent.eventId).slice(0, 10) + ' len=' + answer.length);
     } else {
-      this._log('goal-creator: post-back send failed exit=' + sent.exit + ': ' + (sent.stderr || sent.stdout).slice(0, 120));
+      this._log('goal-creator: step[post] FAILED exit=' + sent.exit + ': ' + (sent.stderr || sent.stdout).slice(0, 120));
     }
   }
 
@@ -298,7 +321,11 @@ export class GoalCreator {
       try { return JSON.parse(text); } catch { return {}; }
     } catch (err) {
       clearTimeout(to);
-      throw err;
+      // Normalize abort/network errors so the poll loop treats them as transient.
+      const msg = err?.name === 'AbortError' || /aborted/i.test(err?.message || '')
+        ? 'aborted (timeout ' + this.cfg.requestTimeoutMs + 'ms)'
+        : (err?.message || String(err));
+      throw new Error(msg);
     }
   }
 
