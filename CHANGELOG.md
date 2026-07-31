@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.4.2] - 2026-07-31
+
+### Fixed
+- **Listener no longer crashes on transient relay/WebSocket blips.** `RelaySocket`
+  emits an `error` event on a failed WebSocket handshake or dropped connection,
+  but `index.js` never attached an `error` listener -- so Node threw on the
+  unhandled `'error'` emission and killed the whole process. A single relay
+  hiccup (e.g. a brief Tailscale/network blip) would take the listener down;
+  launchd restarted it, but with a downtime window and a stale non-zero exit
+  code, and a longer outage caused a crash loop. Added a non-fatal `socket.on(
+  'error')` handler plus process-level `unhandledRejection` / `uncaughtException`
+  guards. Transient errors are now logged and ridden through by the existing
+  exponential-backoff reconnect; a genuine sustained outage still surfaces via
+  `giveup` (clean `process.exit(1)` for the supervisor to restart).
+
+
 ## [1.4.1] - 2026-07-29
 
 ### Fixed

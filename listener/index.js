@@ -197,6 +197,24 @@ const persistTimer = setInterval(() => {
 }, 15000);
 persistTimer.unref?.();
 
+// Crash guard: RelaySocket emits 'error' on transient relay/WebSocket hiccups.
+// Node throws (and kills the process) if an EventEmitter emits 'error' with no
+// listener attached -- so a single relay blip would crash the whole listener.
+// Swallow it here as non-fatal: RelaySocket already handles reconnect via
+// exponential backoff, and a genuine sustained outage still surfaces via
+// 'giveup' below (which exits for the supervisor to restart).
+socket.on('error', (err) => {
+  log('relay-socket error (non-fatal, reconnect handles recovery): ' + (err && err.message ? err.message : String(err)));
+});
+// Belt-and-suspenders: never let an unhandled async rejection or a stray
+// synchronous throw from a callback tear the process down. Log and keep running.
+process.on('unhandledRejection', (err) => {
+  log('unhandledRejection (non-fatal): ' + (err && err.message ? err.message : String(err)));
+});
+process.on('uncaughtException', (err) => {
+  log('uncaughtException (non-fatal): ' + (err && err.stack ? err.stack : (err && err.message ? err.message : String(err))));
+});
+
 socket.on('giveup', () => { log('listener: socket gave up reconnecting -- exiting for supervisor restart'); process.exit(1); });
 process.on('SIGINT', () => { log('SIGINT'); socket.stopLink(); process.exit(0); });
 process.on('SIGTERM', () => { log('SIGTERM'); socket.stopLink(); process.exit(0); });
