@@ -186,9 +186,19 @@ export class GoalCreator {
         tasks.every((t) => ['completed', 'failed', 'skipped'].includes(t.status));
       this._log('goal-creator: step[poll] cycle ' + cycle + ' status=' + status +
         ' tasks=[' + taskStates + '] allDone=' + allTasksDone);
-      // Post back as soon as the goal is terminal OR all tasks are done (the goal
-      // status doesn't always flip to a terminal value even when tasks finish).
-      if (['validated', 'completed', 'failed', 'needs_review'].includes(status) || allTasksDone) {
+      // Post back when: the goal is terminal, OR all tasks are done, OR the first
+      // SUBSTANTIVE task has completed with usable output. The final "Reply in Buzz"
+      // task the planner sometimes emits is agent-side and unreliable (the sandbox
+      // lacks working Buzz creds) — we (the listener) own the post-back, so we must
+      // NOT wait for that task. A completed task carrying real text is enough signal.
+      const substantiveDone = tasks.some(
+        (t) => t.status === 'completed' && this._taskText(t.output)
+      );
+      if (
+        ['validated', 'completed', 'failed', 'needs_review'].includes(status) ||
+        allTasksDone ||
+        substantiveDone
+      ) {
         ready = true;
         break;
       }
@@ -364,13 +374,14 @@ export class GoalCreator {
       `## Recent channel context (most recent last)`,
       contextBlock,
       ``,
-      `## How to respond (IMPORTANT)`,
-      `- When you are done, reply in the same Buzz thread using the buzz-send-message tool.`,
-      `- Set the tool's "channel" to: ${intent.channelId}`,
-      `- Set the tool's "replyTo" to the original event ID: ${intent.eventId}`,
-      `- Keep the reply focused and useful. Include a short summary of what you did.`,
-      `- If the task is large, you may create a side-channel to work in, then post a summary back to this thread with replyTo set as above.`,
-      `- Do NOT reveal private keys or internal reasoning; post only the final message text.`,
+      `## Who posts the reply`,
+      `The listener (this tool) posts your answer back to the Buzz thread using its own`,
+      `working Buzz credentials — you do NOT need to call any Buzz tools yourself.`,
+      `Just DO the work the request asks for and produce a clear final answer as your`,
+      `result (save it to a file and/or state it plainly). The listener extracts your`,
+      `answer and posts it into the thread automatically.`,
+      `If the task is large, you may create a side-channel to work in; keep the final`,
+      `answer concise. Do NOT reveal private keys or internal reasoning.`,
     ].join('\n');
 
     return { title, description };

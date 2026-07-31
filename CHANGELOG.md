@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.4.3] - 2026-07-31
+
+### Fixed
+- **Goal-path replies now post back reliably (no more 4-minute stalls).** The
+  autonomous "goal" reply path (deep research/analysis, then reply in the Buzz
+  thread) could finish the actual work but never post the answer. Two causes,
+  both fixed:
+  1. The goal description instructed the agent to reply itself via
+     `buzz-send-message`. The planner turned this into a separate "Reply in Buzz"
+     task that ran agent-side, where the sandbox lacks working Buzz credentials —
+     so it hung indefinitely. The description now states plainly that the LISTENER
+     owns the post-back (it has working relay creds, same path as the ack); the
+     agent just produces a clear final answer. Task graph drops from 3 tasks to 2
+     (research + draft).
+  2. The listener only posted back once ALL tasks were terminal — so a stuck
+     agent-side reply task blocked the whole post-back until the 4-min poll
+     deadline expired. Post-back now fires as soon as the first SUBSTANTIVE task
+     completes with usable output (`substantiveDone`), extracting the answer and
+     posting it immediately. Verified live end-to-end: answer posted in ~100s with
+     the correct `replyTo`.
+
+
 ## [1.4.2] - 2026-07-31
 
 ### Fixed
