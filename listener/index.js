@@ -216,6 +216,37 @@ process.on('uncaughtException', (err) => {
 });
 
 socket.on('giveup', () => { log('listener: socket gave up reconnecting -- exiting for supervisor restart'); process.exit(1); });
+
+// ---------------------------------------------------------------------------
+// Liveness watchdog (BUGFIX -- 2026-08-04 outage).
+//
+// Two independent failure modes are covered here:
+//
+//   1. SILENT DRAIN. If every timer/handle is released (the old connect-timeout
+//      bug did exactly that), Node's event loop empties and the process exits
+//      with status 0 -- the one status launchd's KeepAlive/SuccessfulExit=false
+//      rule deliberately ignores. This interval is intentionally NOT unref'd,
+//      so the loop can never drain and the process can never vanish silently.
+//
+//   2. WEDGED-BUT-ALIVE. If the socket stays unauthenticated for longer than
+//      staleAfterMs, the listener is deaf even though the process is up. Exit
+//      non-zero so the supervisor restarts us into a clean state.
+// ---------------------------------------------------------------------------
+const STALE_AFTER_MS = Number(cfg.staleAfterMs || 300000);   // 5 min
+const WATCHDOG_TICK_MS = Number(cfg.watchdogTickMs || 30000); // 30 s
+let lastAuthedAt = Date.now();
+socket.on('authed', () => { lastAuthedAt = Date.now(); });
+setInterval(() => {
+  if (socket.isAuthed()) { lastAuthedAt = Date.now(); return; }
+  const staleMs = Date.now() - lastAuthedAt;
+  if (staleMs >= STALE_AFTER_MS) {
+    log('watchdog: not authenticated for ' + Math.round(staleMs / 1000) +
+        's (limit ' + Math.round(STALE_AFTER_MS / 1000) + 's) -- exiting 1 for supervisor restart');
+    process.exit(1);
+  }
+  log('watchdog: link down for ' + Math.round(staleMs / 1000) + 's (limit ' +
+      Math.round(STALE_AFTER_MS / 1000) + 's)');
+}, WATCHDOG_TICK_MS); // NOTE: deliberately not .unref()'d -- see (1) above.
 process.on('SIGINT', () => { log('SIGINT'); socket.stopLink(); process.exit(0); });
 process.on('SIGTERM', () => { log('SIGTERM'); socket.stopLink(); process.exit(0); });
 

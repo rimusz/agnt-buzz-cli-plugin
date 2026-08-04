@@ -7,6 +7,8 @@
   "llmProvider": "GrokAI",
   "llmModel": "grok-4.5",
   "pollIntervalMs": 3000,
+  "staleAfterMs": 300000,
+  "watchdogTickMs": 30000,
   "replyMode": "auto",
   "agentName": "",
   "agentAliases": [],
@@ -17,5 +19,6 @@
   "goalModel": "grok-4.5",
   "_comment": "Copy to config.json (install-listener.sh does this). relayUrl = the URL that opens Buzz from THIS machine. nsecPath = your agent's Buzz private key file. agntTokenPath = a file with your AGNT auth token (the listener calls agntApi to generate replies / create goals). Alternatively set env BUZZ_PRIVATE_KEY / AGNT_AUTH_TOKEN. systemPrompt (optional) overrides the persona.",
   "_replyMode": "auto | stream | goal. 'stream' = fast streaming reply only. 'goal' = create a rich AGNT Goal per mention and run it autonomously (the goal's agent posts the answer back via buzz-send-message). 'auto' (default) = quick streamed ack + a background Goal for substantive requests; trivial greetings just get the streamed reply.",
-  "_mentions": "agentName + agentAliases enable plain-text @mention/name detection (case-insensitive) in ADDITION to #p tags. requireMention=true replies ONLY to #p or name mentions. contextMessages = how many recent channel messages to attach to a Goal (8-12)."
+  "_mentions": "agentName + agentAliases enable plain-text @mention/name detection (case-insensitive) in ADDITION to #p tags. requireMention=true replies ONLY to #p or name mentions. contextMessages = how many recent channel messages to attach to a Goal (8-12).",
+  "_watchdog": "staleAfterMs (default 300000 = 5 min): if the relay link is not authenticated for this long, the listener exits non-zero so the supervisor (launchd/systemd) restarts it clean. watchdogTickMs (default 30000) = how often that is checked. The watchdog timer is deliberately NOT unref'd, which also guarantees the process can never silently drain its event loop and exit 0. Lower staleAfterMs for faster recovery, raise it on a flaky link."
 }

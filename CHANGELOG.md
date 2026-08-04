@@ -1,5 +1,69 @@
 # Changelog
 
+## [1.4.4] - 2026-08-04
+
+### Fixed
+- **Listener could die silently and never come back after a relay restart.**
+  An ordinary relay upgrade (WebSocket close code `1012 relay restarting`) could
+  take the listener permanently offline with no error, no crash and no log line.
+  Observed live: 3.5 hours of missed messages from a ~30 second relay blip.
+  Two independent bugs had to line up, and both are fixed:
+
+  1. **The reconnect was lost on the connect-timeout path** (`relay-socket.js`).
+     `_scheduleReconnect()` was reachable only from `ws.onclose`. The
+     connect-timeout handler called `ws.close()` and assumed `onclose` would
+     follow. It does not: with Node/undici `WebSocket`, calling `close()` on a
+     socket still in `CONNECTING` whose handshake already failed emits an
+     **error** (`"Connection was closed before it was established."`) and
+     **never fires `onclose`**. No reconnect was scheduled, and because
+     `maxReconnectAttempts` is `Infinity` the `giveup` path (the only branch
+     that exits non-zero) was unreachable too — so the listener could not even
+     report its own failure.
+
+     Fixed with a new `_settle(ws, info)`: the single terminal path for a
+     socket, idempotent per-socket (tracked in a `WeakSet`, so a late duplicate
+     close for an older socket can't be mistaken for a fresh drop of the current
+     one) and always ending in `_scheduleReconnect()`. It is now called from
+     `onclose`, the connect-timeout handler, **and** `onerror`-while-not-open.
+     `_safeReopen()` gained a 1s fallback for the same reason.
+
+  2. **A clean exit was the one status the supervisor ignored**
+     (`install-listener.sh`, macOS only). Once the reconnect timer was gone,
+     nothing held the event loop open — `subscribe.js` clears its poll timers on
+     `dropped` and the state-persist timer is `unref`'d — so Node drained and
+     exited **0**. The generated LaunchAgent used:
+
+     ```xml
+     <key>KeepAlive</key>
+     <dict><key>SuccessfulExit</key><false/><key>Crashed</key><true/></dict>
+     ```
+
+     launchd reads `SuccessfulExit=false` as *"relaunch ONLY when the exit status
+     is NON-zero"* — so a clean `exit(0)` is deliberately ignored. The process
+     found the single status its supervisor was configured to skip. `KeepAlive`
+     is now unconditional `<true/>`. The systemd path was already correct
+     (`Restart=always`) and is unchanged.
+
+### Added
+- **Liveness watchdog** (`index.js`). A 30s interval that is deliberately **not**
+  `unref`'d, giving two guarantees: the event loop can never drain to a silent
+  `exit 0`, and if the link stays unauthenticated for longer than
+  `staleAfterMs` the listener exits non-zero so the supervisor restarts it into
+  a clean state. Either one alone would have capped the outage above at 5
+  minutes. Tunable via new `staleAfterMs` (default 300000) and
+  `watchdogTickMs` (default 30000) config keys.
+- **`listener/reconnect-regression.test.mjs`** — 12 assertions, hermetic (no
+  network, no relay, no credentials, `nostr.js` stubbed so `@noble` is not
+  required). Case [1] pulls the pre-fix `relay-socket.js` from git history
+  (`v1.4.3`) and asserts it **fails** to reconnect, so the suite is proven to
+  reproduce the real bug rather than a strawman. Case [6] asserts the installer
+  ships an unconditional `KeepAlive`.
+
+### Upgrading
+Anyone running the listener companion from **v1.3.1–v1.4.3 on macOS** is affected
+and should re-run `listener/install-listener.sh` — the LaunchAgent plist itself
+has to be regenerated, not just the JS. Linux/systemd users only need the code.
+
 ## [1.4.3] - 2026-07-31
 
 ### Fixed

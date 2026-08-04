@@ -92,8 +92,15 @@ $OBS_LINE
   </array>
   <key>WorkingDirectory</key><string>$DIR</string>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key>
-  <dict><key>SuccessfulExit</key><false/><key>Crashed</key><true/></dict>
+  <!--
+    KeepAlive MUST be unconditional <true/>.
+    The previous form was:
+      <dict><key>SuccessfulExit</key><false/><key>Crashed</key><true/></dict>
+    launchd reads SuccessfulExit=false as "relaunch ONLY on a NON-zero exit",
+    i.e. a clean exit(0) is deliberately IGNORED. A relay restart could leave the
+    listener exiting 0 and never coming back (see CHANGELOG 1.4.4).
+  -->
+  <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
   <key>ProcessType</key><string>Background</string>
   <key>StandardOutPath</key><string>$DIR/launchd.out.log</string>

@@ -58,6 +58,7 @@ export class RelaySocket extends EventEmitter {
     this._pingTimer = null;
     this._connectTimer = null;
     this._pendingAuthId = null;
+    this._settled = new WeakSet();
   }
 
   get pubkey() { return this._pubkey; }
@@ -97,6 +98,11 @@ export class RelaySocket extends EventEmitter {
       if (this._ws === ws && ws.readyState !== 1) {
         this._log('relay-socket: connect timeout');
         try { ws.close(); } catch (e) {}
+        // BUGFIX: close() on a socket still in CONNECTING whose handshake already
+        // failed emits 'error' and NEVER fires 'onclose' (undici/Node WebSocket).
+        // Relying on onclose to call _scheduleReconnect() left the link dead
+        // forever. Settle the socket explicitly instead.
+        this._settle(ws, { code: 4000, reason: 'connect timeout' });
       }
     }, this.cfg.connectTimeoutMs);
     ws.onopen = () => {
@@ -121,15 +127,14 @@ export class RelaySocket extends EventEmitter {
     };
     ws.onerror = (ev) => {
       this.emit('error', (ev && ev.error) || new Error('relay-socket: ws error ' + ((ev && ev.message) || '')));
+      // BUGFIX: a handshake-phase error is terminal for this socket and may not
+      // be followed by 'close'. Settle it so a reconnect is always scheduled.
+      if (this._ws === ws && ws.readyState !== 1) {
+        this._settle(ws, { code: 4001, reason: 'handshake error' });
+      }
     };
     ws.onclose = (ev) => {
-      this._clearTimers();
-      const wasAuthed = this._authed;
-      this._authed = false;
-      if (this._ws === ws) this._ws = null;
-      this.emit('dropped', { code: ev && ev.code, reason: ev && ev.reason, wasAuthed });
-      this._log('relay-socket: DROPPED code=' + (ev && ev.code) + ' reason=' + ((ev && ev.reason) || ''));
-      this._scheduleReconnect();
+      this._settle(ws, { code: ev && ev.code, reason: ev && ev.reason });
     };
   }
 
@@ -175,9 +180,40 @@ export class RelaySocket extends EventEmitter {
     }, this.cfg.pingIntervalMs);
   }
 
+  /**
+   * Terminal handler for a socket instance. Idempotent per-socket: whichever of
+   * onclose / connect-timeout / handshake-error fires FIRST wins, later ones are
+   * ignored. Guarantees exactly one 'dropped' emit and one reconnect schedule.
+   */
+  _settle(ws, info) {
+    if (!ws) return;
+    // Per-socket, not a single slot: a late duplicate close for an OLDER socket
+    // must not be mistaken for a fresh drop of the current one. (Caught by
+    // tests/reconnect-regression.test.mjs case [4].)
+    if (this._settled.has(ws)) return;
+    if (this._ws !== ws && this._ws !== null) return; // stale socket, ignore
+    this._settled.add(ws);
+    this._clearTimers();
+    const wasAuthed = this._authed;
+    this._authed = false;
+    if (this._ws === ws) this._ws = null;
+    const code = info && info.code;
+    const reason = (info && info.reason) || '';
+    this.emit('dropped', { code, reason, wasAuthed });
+    this._log('relay-socket: DROPPED code=' + code + ' reason=' + reason);
+    this._scheduleReconnect();
+  }
+
   _safeReopen() {
-    if (this._ws) { try { this._ws.close(); } catch (e) {} }
-    else { this._scheduleReconnect(); }
+    const ws = this._ws;
+    if (ws) {
+      try { ws.close(); } catch (e) {}
+      // BUGFIX: don't trust close() to produce an onclose. If it hasn't settled
+      // shortly, force the reconnect path ourselves.
+      setTimeout(() => this._settle(ws, { code: 4002, reason: 'forced reopen' }), 1000).unref?.();
+    } else {
+      this._scheduleReconnect();
+    }
   }
 
   _scheduleReconnect() {
