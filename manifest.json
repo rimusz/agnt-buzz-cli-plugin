@@ -1,6 +1,6 @@
 {
   "name": "buzz-cli-plugin",
-  "version": "1.4.5",
+  "version": "1.4.6",
   "description": "Buzz (Block Nostr workspace) via official buzz CLI. After install: set BUZZ_RELAY_URL + BUZZ_BIN, create AGNT agent, provision identity (tool buzz-provision-identity or script), assign buzz_* tools. See docs/CONNECT-ANY-AGENT.md. Per-agent keys; tools never return private keys. Optional real-time listener companion (listener/) makes the agent auto-reply to DMs/mentions in ~3s.",
   "author": "AGNT",
   "icon": "message-square",

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Nightly Buzz relay backup (macOS launchd).
+
+  Replace before use:
+    __SCRIPT__   absolute path to backup-buzz.sh  (e.g. $HOME/.agnt/buzz-backup/backup-buzz.sh)
+    __DIR__      working directory                (e.g. $HOME/.agnt/buzz-backup)
+
+  Install:
+    plutil -lint com.agnt.buzz-backup.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.agnt.buzz-backup.plist
+
+  Run once immediately, without waiting for the schedule:
+    launchctl kickstart -k gui/$(id -u)/com.agnt.buzz-backup
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.agnt.buzz-backup</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>__SCRIPT__</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__DIR__</string>
+
+  <!--
+    PATH matters: launchd jobs do NOT inherit a login shell's PATH, and this
+    script shells out to `docker`. Without the Docker CLI directory listed here
+    the job fails at preflight with exit 69.
+  -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <!--
+    Nightly at 03:30 LOCAL time (launchd calendar intervals are local, not UTC).
+    If the machine is asleep at the scheduled moment, launchd runs the job once
+    on wake rather than skipping the day.
+  -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+
+  <!--
+    Deliberately NOT RunAtLoad: this is a periodic job, and running it on every
+    login/reload would churn snapshots without adding protection.
+
+    Deliberately NOT KeepAlive: the script is a one-shot that exits. KeepAlive
+    would relaunch it in a tight loop — the opposite of what the listener job
+    needs, and a good example of why these two plists differ.
+  -->
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <!-- Low priority: a backup must never compete with the relay for I/O. -->
+  <key>LowPriorityIO</key>
+  <true/>
+  <key>Nice</key>
+  <integer>5</integer>
+
+  <key>StandardOutPath</key>
+  <string>__DIR__/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__DIR__/launchd.err.log</string>
+</dict>
+</plist>

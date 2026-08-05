@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.4.6] - 2026-08-05
+
+### Added
+- **`ops/` — backup and restore for a self-hosted relay.** Everything a Buzz
+  relay remembers (channels, messages, DMs, audit log, attachments) lives in
+  Docker volumes, and there was no backup of any kind: no dump, no schedule,
+  no script. `docker compose down -v`, a bad migration or a Docker Desktop
+  reset would have taken the lot, irreversibly.
+
+  - `ops/backup-buzz.sh` — snapshots Postgres (`pg_dump -Fc`), the MinIO
+    attachment store and the relay git store; writes a manifest recording the
+    container and volume names that snapshot came from; prunes past the
+    retention window. Every default is overridable by environment variable.
+  - **The dump is verified, not assumed.** Every run parses the archive with
+    `pg_restore --list` and fails if it is unreadable. `--verify` goes
+    further and restores into a throwaway database, counts tables and rows,
+    then drops it — production is never touched.
+  - `ops/RESTORE.md` — restore procedure, including restoring into a scratch
+    database first, and recovery from total volume loss.
+  - `ops/launchd/` — nightly schedule (03:30 local). Sets `PATH` explicitly
+    because launchd jobs do not inherit a login shell PATH and the script
+    shells out to `docker`; runs `LowPriorityIO` so a backup never competes
+    with the relay for I/O.
+
+  Volumes are only ever mounted read-only, and retention uses `find -delete`
+  scoped to this script's own filename patterns.
+
+
 ## [1.4.5] - 2026-08-05
 
 ### Added
