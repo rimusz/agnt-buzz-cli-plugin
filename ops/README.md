@@ -7,6 +7,7 @@ because a self-hosted relay is only as durable as its backups.
 | File | Purpose |
 |---|---|
 | [`backup-buzz.sh`](backup-buzz.sh) | Snapshot Postgres + MinIO + the git store, verify the dump, prune old copies |
+| [`restore-drill.sh`](restore-drill.sh) | Rehearse a full recovery from an on-disk snapshot, without touching production |
 | [`RESTORE.md`](RESTORE.md) | How to restore — including restoring somewhere safe first |
 | [`launchd/`](launchd/) | Nightly schedule for macOS |
 
@@ -25,7 +26,19 @@ undo, and a relay with no history is not much of a workspace.
 
 # backup, then prove the dump actually restores (into a throwaway database)
 ./backup-buzz.sh --verify
+
+# rehearse a full recovery from what is already on disk
+./restore-drill.sh --list      # available snapshots
+./restore-drill.sh             # drill the most recent one
+./restore-drill.sh <stamp>     # drill a specific one
 ```
+
+`--verify` and the drill answer different questions. `--verify` checks the dump
+the same run just produced, and only the Postgres part. The drill starts from
+the **archive files as they sit on disk** — what you would actually reach for in
+an incident — and exercises all three payloads, comparing restored attachments
+against the live volume file by file. It exits non-zero when a snapshot is not
+trustworthy, so it can gate a release or run from cron.
 
 Defaults suit a standard `buzz-prod` compose stack; override with
 `BUZZ_BACKUP_DIR`, `BUZZ_BACKUP_KEEP_DAYS`, `BUZZ_PG_CONTAINER`,

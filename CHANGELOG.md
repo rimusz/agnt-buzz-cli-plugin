@@ -1,5 +1,44 @@
 # Changelog
 
+## [1.4.7] - 2026-08-05
+
+### Added
+- **`ops/restore-drill.sh` — rehearse a full recovery from an on-disk snapshot.**
+  `backup-buzz.sh --verify` only checks the dump it just produced, and only the
+  Postgres part of it. The drill starts from the archive files **as they sit on
+  disk** — what you would actually reach for in an incident — and exercises all
+  three payloads:
+
+  - archive integrity (gzip stream + `pg_restore` header parse);
+  - Postgres restored into a scratch database, compared with production using
+    exact per-table counts (`pg_stat_user_tables` is an estimate and is stale in
+    a freshly restored database, so it cannot be used);
+  - every MinIO object and git file md5-compared against the live volume.
+
+  Exits non-zero when a snapshot is not trustworthy, so it can gate a release or
+  run from cron. Production is never written to: the live database is only read,
+  live volumes are mounted read-only, and the scratch database is dropped via an
+  EXIT trap even if the drill aborts partway.
+
+  Two findings are reported but deliberately do NOT fail the drill, because both
+  are healthy: row drift in `audit_log` (a point-in-time backup lags a relay that
+  kept serving) and `.minio.sys` file-count differences (MinIO rewrites usage
+  counters, bloom cycle and a tmp/trash area continuously, and regenerates them
+  on start). Only user objects decide pass or fail.
+
+### Fixed
+- **A verification step that silently verified nothing.** The volume comparison
+  ran `sh -s` inside `docker run` without `-i`, so no stdin was attached: the
+  inner script never executed, the command exited 0, and the drill printed a
+  pass having checked neither MinIO nor the git store. Fixed by attaching stdin,
+  and hardened so the class of bug cannot silently return — a comparison that
+  produces no verdict is now a failure rather than a pass.
+
+  Verified both ways: a real snapshot passes (65 MinIO objects and 2 git files
+  identical to the live volumes), and a deliberately altered snapshot is
+  rejected with exit 1.
+
+
 ## [1.4.6] - 2026-08-05
 
 ### Added

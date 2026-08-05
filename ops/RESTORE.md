@@ -105,6 +105,37 @@ Wait for `buzz-prod-postgres-1` to report `(healthy)` before running
 
 ## Verifying a backup without restoring anything
 
-`backup-buzz.sh --verify` restores the dump into a throwaway database, counts
-the tables and rows, and drops it again. Production is never touched. Worth
-running periodically — an untested backup is a hope, not a plan.
+Two tools, answering two different questions. Production is never written to by
+either.
+
+**`backup-buzz.sh --verify`** — checks the dump it just produced: restores it
+into a throwaway database, counts tables and rows, drops it. Fast, and it runs
+as part of a backup.
+
+**`restore-drill.sh`** — rehearses the whole recovery from the **archive files
+as they sit on disk**, which is what you would actually reach for in an
+incident:
+
+```sh
+./restore-drill.sh --list      # available snapshots
+./restore-drill.sh             # drill the most recent one
+./restore-drill.sh 20260805-132512
+```
+
+It checks archive integrity, restores Postgres into a scratch database with
+exact per-table counts, and md5-compares every restored MinIO object and git
+file against the live volume. Exit 0 means recoverable; exit 1 means the
+snapshot should not be relied on.
+
+Two things it reports that look like problems and are not:
+
+- **Row drift in `audit_log`** (and similar). A point-in-time backup lags a live
+  relay that kept serving after the snapshot. Shown, not failed. Zero drift
+  would be more suspicious than a little.
+- **`.minio.sys` file-count differences.** MinIO continuously rewrites usage
+  counters, the bloom cycle and a tmp/trash scratch area, and regenerates them
+  on start. Only **user objects** decide pass or fail.
+
+Run it periodically. An untested backup is a hope, not a plan — and the drill
+itself is built so that a check which silently does nothing counts as a
+failure, not a pass.
