@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  REFERENCE COPY of the launchd job that supervises the Buzz listener on macOS.
+
+  You normally do NOT hand-install this file — `listener/install-listener.sh`
+  generates it, substituting the node binary and install directory it detects.
+  This copy exists because the generated file is the only place some of these
+  decisions were recorded, and a generated file is one `rm` away from taking
+  the reasoning with it.
+
+  To use it directly, replace:
+    __NODE__   absolute path to the node binary (e.g. /opt/homebrew/opt/node@22/bin/node)
+    __DIR__    listener install directory      (e.g. $HOME/.agnt/annie-buzz-listener)
+
+  then:
+    plutil -lint com.agnt.annie-buzz-listener.plist
+    launchctl bootstrap gui/$(id -u) com.agnt.annie-buzz-listener.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.agnt.annie-buzz-listener</string>
+
+  <!--
+    Long-lived event-driven listener (NOT a cron poller). The process runs
+    continuously, holding one authenticated WebSocket to the Buzz relay.
+    launchd is the outer supervisor; the module's own exponential-backoff
+    reconnect handles transient relay drops.
+
+    ROLLOUT NOTE: to run boot-persistent but SILENT (observe-only, sends
+    nothing), add <string>--observe</string> to ProgramArguments below.
+    Remove it for full reply-sending operation once coverage is verified.
+  -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>__DIR__/index.js</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__DIR__</string>
+
+  <!--
+    OPTIONAL. install-listener.sh does not emit this block: with no environment
+    set, index.js defaults config.json / listener-state.json / listener.log to
+    files alongside itself, which is what a standalone install wants.
+
+    Set these only to point the listener at files somewhere else — for example
+    to share an existing poller's config rather than maintain two copies.
+    index.js prefers BUZZ_* and falls back to ANNIE_* (see index.js:55-57).
+
+    PATH matters because launchd jobs do NOT inherit a login shell's PATH; if
+    the listener shells out to the `buzz` CLI, the directory containing it must
+    be listed here.
+  -->
+  <!--
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>BUZZ_LISTENER_CONFIG</key>
+    <string>__DIR__/config.json</string>
+    <key>BUZZ_LISTENER_STATE</key>
+    <string>__DIR__/listener-state.json</string>
+    <key>BUZZ_LISTENER_LOG</key>
+    <string>__DIR__/listener.log</string>
+  </dict>
+  -->
+
+  <!-- Start at login and keep it running. -->
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!--
+    KeepAlive MUST be unconditional <true/>.
+
+    The form used before v1.4.4 was:
+        <dict><key>SuccessfulExit</key><false/><key>Crashed</key><true/></dict>
+    with a comment claiming SuccessfulExit=false meant "relaunch even on a
+    clean exit". That is exactly backwards. launchd reads SuccessfulExit=false
+    as "relaunch ONLY when the exit status is NON-zero" — a clean exit(0) is
+    the one case launchd was being told to ignore. Verify with:
+
+        launchctl print gui/$(id -u)/com.agnt.annie-buzz-listener
+        -> semaphores = { successful exit => 0, after crash => 1 }
+
+    On 2026-08-04 the listener hit a relay restart (WS 1012), lost its
+    reconnect timer to a connect-timeout bug, drained its event loop and
+    exited 0 — landing squarely in that ignored case. It stayed down ~3.5h.
+
+    Plain <true/> means "always keep it running while loaded". To stop it
+    deliberately, unload the job rather than killing the process:
+
+        launchctl bootout gui/$(id -u)/com.agnt.annie-buzz-listener
+  -->
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Do not relaunch more than once per 10s (avoids tight relaunch loops). -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>__DIR__/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__DIR__/launchd.err.log</string>
+</dict>
+</plist>
