@@ -8,6 +8,7 @@ because a self-hosted relay is only as durable as its backups.
 |---|---|
 | [`backup-buzz.sh`](backup-buzz.sh) | Snapshot Postgres + MinIO + the git store, verify the dump, prune old copies |
 | [`restore-drill.sh`](restore-drill.sh) | Rehearse a full recovery from an on-disk snapshot, without touching production |
+| [`test/negative-test.sh`](test/negative-test.sh) | Prove the drill actually fails on a bad snapshot |
 | [`RESTORE.md`](RESTORE.md) | How to restore — including restoring somewhere safe first |
 | [`launchd/`](launchd/) | Nightly schedule for macOS |
 
@@ -39,6 +40,20 @@ the **archive files as they sit on disk** — what you would actually reach for 
 an incident — and exercises all three payloads, comparing restored attachments
 against the live volume file by file. It exits non-zero when a snapshot is not
 trustworthy, so it can gate a release or run from cron.
+
+## Trusting the drill itself
+
+A verification tool that only ever reports success is worthless, so the drill
+has its own negative test:
+
+```sh
+./test/negative-test.sh
+```
+
+It takes a real snapshot, alters exactly one user object, and asserts the drill
+notices and exits non-zero. It exists because the drill once shipped with a bug
+that did precisely the wrong thing — a comparison that silently ran nothing and
+reported a pass. Run it after changing `restore-drill.sh`.
 
 Defaults suit a standard `buzz-prod` compose stack; override with
 `BUZZ_BACKUP_DIR`, `BUZZ_BACKUP_KEEP_DAYS`, `BUZZ_PG_CONTAINER`,

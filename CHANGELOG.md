@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.4.8] - 2026-08-05
+
+### Added
+- **`ops/test/negative-test.sh` — proves the restore drill can actually fail.**
+  A verification tool that only ever reports success is worthless: every green
+  drill result is only meaningful if the drill is demonstrably capable of going
+  red. This takes a real snapshot, alters exactly one MinIO **user object**, and
+  asserts `restore-drill.sh` notices and exits non-zero.
+
+  It targets a user object deliberately — those are the drill's pass/fail
+  criterion, whereas `.minio.sys` churn is ignored by design, so corrupting that
+  would prove nothing. The rebuilt archive uses `--no-mac-metadata`, since
+  AppleDouble (`._*`) sidecar files added by macOS `tar` would also trip the
+  drill — but for the wrong reason, muddying what the test demonstrates.
+
+  This exists because `restore-drill.sh` shipped (briefly) with a bug that did
+  precisely the wrong thing: a volume comparison that silently executed nothing
+  and reported a pass. A green light that verifies nothing is worse than no
+  light at all. Run this after any change to the drill.
+
+  Production is never involved — the test works entirely inside a scratch
+  directory, and the drill only ever reads the live volumes.
+
+
 ## [1.4.7] - 2026-08-05
 
 ### Added
