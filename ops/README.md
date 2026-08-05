@@ -28,6 +28,9 @@ undo, and a relay with no history is not much of a workspace.
 # backup, then prove the dump actually restores (into a throwaway database)
 ./backup-buzz.sh --verify
 
+# backup, then run the FULL recovery rehearsal on what was just written
+./backup-buzz.sh --drill
+
 # rehearse a full recovery from what is already on disk
 ./restore-drill.sh --list      # available snapshots
 ./restore-drill.sh             # drill the most recent one
@@ -54,6 +57,29 @@ It takes a real snapshot, alters exactly one user object, and asserts the drill
 notices and exits non-zero. It exists because the drill once shipped with a bug
 that did precisely the wrong thing — a comparison that silently ran nothing and
 reported a pass. Run it after changing `restore-drill.sh`.
+
+## Self-verifying backups
+
+The nightly LaunchAgent passes `--drill`, so each snapshot is rehearsed the
+moment it is written — not the first time it is needed, which is the worst
+possible moment to find out it does not restore.
+
+| Outcome | Exit | What happens |
+|---|---|---|
+| backup + drill passed | `0` | snapshot is proven recoverable |
+| backup written, drill rejected it | `2` | **snapshot is kept** for inspection, launchd records a failure |
+| backup itself failed | `1` | nothing to trust; see the log |
+
+A rejected snapshot is deliberately never deleted. It is the most useful thing
+to have on disk while working out why — and removing it would leave the previous
+good snapshot as the newest, quietly hiding that anything went wrong.
+
+Check the outcome of the last scheduled run at any time:
+
+```sh
+launchctl print gui/$(id -u)/com.agnt.buzz-backup | grep -E 'runs|last exit'
+tail -20 ~/.agnt/buzz-backup/backup.log
+```
 
 Defaults suit a standard `buzz-prod` compose stack; override with
 `BUZZ_BACKUP_DIR`, `BUZZ_BACKUP_KEEP_DAYS`, `BUZZ_PG_CONTAINER`,

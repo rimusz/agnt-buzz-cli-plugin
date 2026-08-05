@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.4.9] - 2026-08-05
+
+### Added
+- **`backup-buzz.sh --drill` — every snapshot now self-verifies.** The nightly
+  LaunchAgent passes `--drill`, so the full restore rehearsal runs against each
+  snapshot the moment it is written, instead of the first time it is needed —
+  which is the worst possible moment to discover a backup does not restore.
+
+  On a small relay it costs a few seconds. `--drill` supersedes `--verify` when
+  both are given, since the drill already restores into a scratch database and
+  doing it twice would only be slower and weaker.
+
+### Changed
+- **Exit codes now distinguish "backup failed" from "backup is not trustworthy".**
+  `0` backup and drill passed · `1` the backup itself failed · `2` the archives
+  were written but the drill rejected them · `69` docker unavailable.
+
+  A rejected snapshot is deliberately **kept on disk**. It is the most useful
+  thing to have while working out why, and deleting it would leave the previous
+  good snapshot as the newest — quietly hiding that anything went wrong.
+
+  A missing or non-executable `restore-drill.sh` also exits 2 rather than
+  silently skipping: a verification step that quietly does nothing is the exact
+  failure mode this suite already had to fix once.
+
+- Proper option parsing with `--help`; unknown flags now exit 64 instead of
+  being ignored.
+
+
 ## [1.4.8] - 2026-08-05
 
 ### Added

@@ -18,6 +18,17 @@
 # USAGE
 #   ./backup-buzz.sh              # run a backup
 #   ./backup-buzz.sh --verify     # also test-restore into a scratch database
+#   ./backup-buzz.sh --drill      # also run the FULL restore drill on what was
+#                                 # just written (see restore-drill.sh)
+#
+# --verify vs --drill
+#   --verify checks only the Postgres dump, in the same run that produced it.
+#   --drill re-reads the archives FROM DISK and checks all three payloads,
+#   md5-comparing restored MinIO objects and git files against the live volumes.
+#   --drill is the stronger claim, so it supersedes --verify when both are given.
+#
+#   Chaining --drill onto the nightly job means every snapshot is proven
+#   recoverable the moment it is taken, rather than the first time it is needed.
 #
 # CONFIG (all optional, sensible defaults for a standard `buzz-prod` stack)
 #   BUZZ_BACKUP_DIR         where dumps are written   (~/.agnt/buzz-backup/backups)
@@ -28,7 +39,10 @@
 #   BUZZ_TAR_IMAGE          image used to tar volumes (postgres:17-alpine)
 #
 # EXIT CODES
-#   0 ok   1 backup failed   69 docker or container unavailable
+#   0 ok
+#   1 backup failed
+#   2 backup written but the drill REJECTED it (snapshot kept for inspection)
+#   69 docker or container unavailable
 
 set -eu
 
@@ -43,7 +57,26 @@ TAR_IMAGE="${BUZZ_TAR_IMAGE:-postgres:17-alpine}"
 STAMP=$(date -u '+%Y%m%d-%H%M%S')
 LOG="${DEST%/backups}/backup.log"
 VERIFY=0
-[ "${1:-}" = "--verify" ] && VERIFY=1
+DRILL=0
+for arg in "$@"; do
+  case "$arg" in
+    --verify) VERIFY=1 ;;
+    --drill)  DRILL=1 ;;
+    -h|--help)
+      sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
+    *)
+      echo "unknown option: $arg (try --help)" >&2
+      exit 64 ;;
+  esac
+done
+# The drill restores into a scratch database as part of its own work, so running
+# --verify as well would do the same job twice, more weakly.
+[ "$DRILL" -eq 1 ] && VERIFY=0
+
+# restore-drill.sh ships alongside this script, in both the repo (ops/) and the
+# deployed copy, so a sibling lookup works in either location.
+DRILL_BIN="${BUZZ_DRILL_BIN:-$(cd "$(dirname "$0")" && pwd)/restore-drill.sh}"
 
 mkdir -p "$DEST" "$(dirname "$LOG")"
 
@@ -156,5 +189,36 @@ if [ "$VERIFY" -eq 1 ]; then
   log "verify: OK — restored $TABLES tables, $ROWS rows, scratch database dropped"
 fi
 
+# --- 6. optional full drill -------------------------------------------------
+# Re-reads the archives FROM DISK and checks all three payloads, exactly as a
+# real recovery would. Chaining this onto the nightly job means a snapshot is
+# proven recoverable the moment it is taken, instead of the first time it is
+# needed — which is the worst possible moment to discover otherwise.
+DRILL_RC=0
+if [ "$DRILL" -eq 1 ]; then
+  if [ ! -x "$DRILL_BIN" ]; then
+    log "drill: SKIPPED — restore-drill.sh not found or not executable at $DRILL_BIN"
+    DRILL_RC=2
+  else
+    log "drill: running full recovery rehearsal against $STAMP"
+    if BUZZ_BACKUP_DIR="$DEST" "$DRILL_BIN" "$STAMP" >>"$LOG" 2>&1; then
+      log "drill: PASSED — snapshot $STAMP is proven recoverable"
+    else
+      DRILL_RC=2
+      # Deliberately NOT deleted. A snapshot the drill rejects is the single
+      # most useful thing to have on disk while working out why, and removing
+      # it would also leave the previous good one as the newest — quietly
+      # hiding that anything went wrong.
+      log "drill: FAILED — snapshot $STAMP did NOT verify. Kept on disk for inspection."
+      log "drill: investigate with: $DRILL_BIN $STAMP"
+    fi
+  fi
+fi
+
 TOTAL=$(du -sh "$DEST" | awk '{print $1}')
 log "=== done. $(find "$DEST" -maxdepth 1 -name 'buzz-pg-*.dump' | wc -l | tr -d ' ') snapshot(s) retained, $TOTAL total"
+
+# The backup itself succeeded either way — the files are written and retained.
+# Exit 2 reports that the snapshot is not trustworthy, so launchd records a
+# failure and a caller chaining on success does not treat it as verified.
+exit "$DRILL_RC"

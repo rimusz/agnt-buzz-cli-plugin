@@ -19,10 +19,22 @@
   <key>Label</key>
   <string>com.agnt.buzz-backup</string>
 
+  <!--
+    --drill runs the full restore rehearsal against the snapshot immediately
+    after writing it, so every nightly backup is proven recoverable at the time
+    it is taken rather than the first time it is needed. It costs a few seconds
+    on a small relay. Drop the flag to skip it, or use --verify for the lighter
+    Postgres-only check.
+
+    A failed drill exits 2, which launchd records as a non-zero exit — visible
+    in `launchctl print gui/$(id -u)/com.agnt.buzz-backup`. The snapshot is kept
+    on disk for inspection either way.
+  -->
   <key>ProgramArguments</key>
   <array>
     <string>/bin/sh</string>
     <string>__SCRIPT__</string>
+    <string>--drill</string>
   </array>
 
   <key>WorkingDirectory</key>
