@@ -9,9 +9,13 @@
   "pollIntervalMs": 3000,
   "staleAfterMs": 300000,
   "watchdogTickMs": 30000,
+  "blindspotEnabled": true,
+  "blindspotIntervalMs": 3000,
+  "lookbackMessages": 20,
   "replyMode": "auto",
   "agentName": "",
   "agentAliases": [],
+  "authorAliases": {},
   "requireMention": false,
   "contextMessages": 12,
   "goalMaxIterations": 12,
@@ -19,6 +23,8 @@
   "goalModel": "grok-4.5",
   "_comment": "Copy to config.json (install-listener.sh does this). relayUrl = the URL that opens Buzz from THIS machine. nsecPath = your agent's Buzz private key file. agntTokenPath = a file with your AGNT auth token (the listener calls agntApi to generate replies / create goals). Alternatively set env BUZZ_PRIVATE_KEY / AGNT_AUTH_TOKEN. systemPrompt (optional) overrides the persona.",
   "_replyMode": "auto | stream | goal. 'stream' = fast streaming reply only. 'goal' = create a rich AGNT Goal per mention and run it autonomously (the goal's agent posts the answer back via buzz-send-message). 'auto' (default) = quick streamed ack + a background Goal for substantive requests; trivial greetings just get the streamed reply.",
-  "_mentions": "agentName + agentAliases enable plain-text @mention/name detection (case-insensitive) in ADDITION to #p tags. requireMention=true replies ONLY to #p or name mentions. contextMessages = how many recent channel messages to attach to a Goal (8-12).",
+  "_mentions": "agentName + agentAliases enable plain-text @mention/name detection (case-insensitive) in ADDITION to #p tags. requireMention=true replies ONLY to #p or name mentions -- EXCEPT in a 1:1 DM room, where every message is addressed to the agent by definition and a bare 'thanks!' still gets a reply. contextMessages = how many recent channel messages to attach to a Goal (8-12).",
+  "_authorAliases": "OPTIONAL map of { pubkeyHex: 'Display Name' } so the agent calls people by name instead of 'user:fc12db5f'. The name is used in logs AND passed to the LLM as the message author, so leaving this empty is why an agent may answer without ever using your name. Example: { \"fc12db5f...\": \"Rimas\" }",
+  "_blindspot": "blindspotEnabled (default true): covers messages the relay subscription CANNOT see. The relay rejects an un-p-gated {kinds:[9]} REQ, so subscribe.js only ever receives messages carrying #p:<agent>. Clients that do not attach that tag (notably the Buzz phone app, even when you type the agent's name or use reply) are therefore invisible to the listener -- the message is stored, every human sees it, and the agent never does. blindspot.js polls the non-p-gated `buzz messages get` HTTP API every blindspotIntervalMs and feeds ONLY un-p-tagged messages into the same handler. The two sources are disjoint by construction (subscription = HAS #p, blindspot = has NO #p) so double replies are impossible. lookbackMessages = how many recent messages to fetch per channel per scan. Set blindspotEnabled=false only if a separate poller already covers this.",
   "_watchdog": "staleAfterMs (default 300000 = 5 min): if the relay link is not authenticated for this long, the listener exits non-zero so the supervisor (launchd/systemd) restarts it clean. watchdogTickMs (default 30000) = how often that is checked. The watchdog timer is deliberately NOT unref'd, which also guarantees the process can never silently drain its event loop and exit 0. Lower staleAfterMs for faster recovery, raise it on a flaky link."
 }

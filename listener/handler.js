@@ -114,12 +114,18 @@ export class Handler {
 
     // Mention detection: how (if at all) is this addressed to us?
     const mentionMethod = this._detectMention(event, content);
-    if (this.cfg.requireMention && mentionMethod === 'none') {
+    // requireMention exists to avoid answering ambient chatter in a busy room.
+    // In a 1:1 DM there IS no ambient chatter -- every message is addressed to
+    // us -- so a bare "thanks!" or "i'm good too" must still get a reply.
+    // ctx.isOneToOne is set by blindspot.js, which knows the channel name.
+    const oneToOne = !!(ctx && ctx.isOneToOne);
+    if (this.cfg.requireMention && mentionMethod === 'none' && !oneToOne) {
       // configured to only answer explicit mentions -> ignore ambient chatter
       return;
     }
 
-    this._debounceReply(event, { channelId, author, content, mentionMethod });
+    const source = (ctx && ctx.source) || 'subscription';
+    this._debounceReply(event, { channelId, author, content, mentionMethod, source });
   }
 
   // -------------------------------------------------------------------------
@@ -186,12 +192,13 @@ export class Handler {
       content: meta.content,
       createdAt: event.created_at,
       mentionMethod: meta.mentionMethod, // 'p-tag' | 'name-mention' | 'p-tag+name' | 'none'
+      source: meta.source, // 'subscription' (p-gated relay REQ) | 'blindspot' (HTTP scan)
       thread: this._threadSnapshot(meta.channelId),
       rawEvent: event,
     };
     this._log(
       'handler: intent from ' + intent.author + ' in ' + (intent.channelId || '?').slice(0, 8) +
-        ' via ' + intent.mentionMethod +
+        ' via ' + intent.mentionMethod + ' [' + intent.source + ']' +
         ' :: ' + JSON.stringify(intent.content.slice(0, 60))
     );
     try {

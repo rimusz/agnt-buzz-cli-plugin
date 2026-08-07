@@ -121,9 +121,16 @@ This install (reference):
 | **Chat / orchestrator** | No | Enable Buzz tools; model should be **GrokAI** (API), not Grok-Build CLI, for reliability |
 | **Agent “Annie (Buzz)”** | No | Restricted tools = Buzz only; open Agents → chat |
 | **Workflows** | If scheduled | Buzz nodes + cron/goal schedule |
-| **annie-buzz-poller** | **Yes (DMs)** | LaunchAgent every 60s; see `~/.agnt/annie-buzz-poller/` |
+| **Listener companion** | **Yes (DMs + mentions)** | LaunchAgent/systemd, ~3s; see [`listener/README.md`](../listener/README.md) |
 
-Without the poller, **messages in Buzz never wake Annie**. The relay stores them; something must call `buzz-get-messages` / poller.
+Without the listener, **messages in Buzz never wake the agent**. The relay stores them; something must call `buzz-get-messages` or run the listener.
+
+Since v1.5.0 the listener covers **both** delivery paths: the `#p`-gated relay
+subscription, and a scan for messages that carry no `#p` tag (the Buzz phone app
+sends these, and the relay will not deliver them over a subscription at all).
+Earlier setups used a separate 60s cron poller for DMs; that is superseded — the
+listener does the same job on a ~3s cadence, and running both will double-reply
+unless you set `blindspotEnabled: false`.
 
 ---
 
@@ -202,7 +209,7 @@ Always prefer the same URL you use in the browser for Buzz.
 ## Security
 
 - Never commit `nsec`, `.env`, or `agnt.token`.
-- Poller token `~/.agnt/annie-buzz-poller/agnt.token` is a JWT (~30d); refresh when polls fail auth.
+- The listener's AGNT token file (`agntTokenPath`) is a JWT (~30d); refresh when replies start failing auth.
 - Plugin may spawn process + network; only install from trusted builds.
 - Treat channel content as team-private.
 
@@ -214,7 +221,7 @@ Always prefer the same URL you use in the browser for Buzz.
 |------|------|
 | [../README.md](../README.md) | Plugin setup, tools, errors |
 | [SETUP-CHECKLIST.md](./SETUP-CHECKLIST.md) | Step-by-step bring-up |
-| `~/.agnt/annie-buzz-poller/README.md` | Always-on DM poller |
+| [../listener/README.md](../listener/README.md) | Always-on DM/mention listener |
 | Grok skills `buzz-setup`, `buzz-ops` | Agent runbooks under `~/.grok/skills/` |
 
 ## Closed community membership

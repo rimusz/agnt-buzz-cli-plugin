@@ -41,6 +41,7 @@ import { Subscription } from './subscribe.js';
 import { Handler } from './handler.js';
 import { Responder } from './responder.js';
 import { GoalCreator } from './goal-creator.js';
+import { BlindspotScanner } from './blindspot.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OBSERVE = process.argv.includes('--observe');
@@ -190,11 +191,48 @@ const sub = new Subscription({
 sub.seedSince(state.sinceCursor || 0);
 sub.attach();
 
-const persistTimer = setInterval(() => {
+// ---------------------------------------------------------------------------
+// BLIND-SPOT SCANNER (added 2026-08-07)
+//
+// The subscription above is #p-gated by the relay, so it CANNOT see messages
+// that arrive without a #p tag -- which is exactly what the Buzz phone client
+// sends. Those messages used to be answered (late, and only sometimes) by a
+// separate 60s cron poller; that poller is now retired and its job lives here,
+// on the same 3s cadence as the subscription, feeding the same handler.
+//
+// The two sources are disjoint by construction: subscription = HAS #p:<us>,
+// blindspot = has NO #p:<us>. handler.js additionally dedupes on event.id.
+// ---------------------------------------------------------------------------
+const blindspot = new BlindspotScanner({
+  buzzBin,
+  privateKey,
+  relayUrl: cfg.relayUrl,
+  selfPubkey: socket.pubkey,
+  log,
+  onEvent: (event, ctx) => handler.ingest(event, ctx),
+  tuning: {
+    intervalMs: cfg.blindspotIntervalMs || cfg.pollIntervalMs || 3000,
+    lookback: cfg.lookbackMessages || 20,
+    replyMode: cfg.replyMode === 'all_channels' ? 'all_channels' : 'dms_only',
+  },
+});
+if (cfg.blindspotEnabled === false) {
+  log('blindspot: DISABLED by config (blindspotEnabled=false)');
+} else {
+  blindspot.seedState(state.blindspot);
+  blindspot.start();
+}
+
+function persistState() {
   try {
-    fs.writeFileSync(STATE_PATH, JSON.stringify({ sinceCursor: sub.sinceCursor, updatedAt: new Date().toISOString() }, null, 2));
+    fs.writeFileSync(STATE_PATH, JSON.stringify({
+      sinceCursor: sub.sinceCursor,
+      blindspot: blindspot.getState(),
+      updatedAt: new Date().toISOString(),
+    }, null, 2));
   } catch {}
-}, 15000);
+}
+const persistTimer = setInterval(persistState, 15000);
 persistTimer.unref?.();
 
 // Crash guard: RelaySocket emits 'error' on transient relay/WebSocket hiccups.
@@ -247,7 +285,9 @@ setInterval(() => {
   log('watchdog: link down for ' + Math.round(staleMs / 1000) + 's (limit ' +
       Math.round(STALE_AFTER_MS / 1000) + 's)');
 }, WATCHDOG_TICK_MS); // NOTE: deliberately not .unref()'d -- see (1) above.
-process.on('SIGINT', () => { log('SIGINT'); socket.stopLink(); process.exit(0); });
-process.on('SIGTERM', () => { log('SIGTERM'); socket.stopLink(); process.exit(0); });
+// Persist blind-spot cursors on the way out so a restart never re-answers a
+// message we already handled (nor skips one that arrived mid-shutdown).
+process.on('SIGINT', () => { log('SIGINT'); blindspot.stop(); persistState(); socket.stopLink(); process.exit(0); });
+process.on('SIGTERM', () => { log('SIGTERM'); blindspot.stop(); persistState(); socket.stopLink(); process.exit(0); });
 
 socket.start();

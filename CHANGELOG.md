@@ -1,5 +1,60 @@
 # Changelog
 
+## [1.5.0] - 2026-08-07
+
+### Added
+- **`listener/blindspot.js` — the agent can now see messages the relay will not
+  deliver.** A subscription is `#p`-gated: the relay rejects an un-p-gated
+  `{kinds:[9]}` REQ with `restricted: p-gated events require #p matching your
+  pubkey`. Clients that do not attach that tag — notably the **Buzz phone app**,
+  even when you type the agent's name or use reply — were therefore invisible to
+  the listener. The message was stored, every human in the channel saw it, and
+  the agent never did. On one deployment **25 of 97 messages over 14 days** had
+  no `#p` tag, and the oldest silently-dropped question was 6 days old.
+
+  `blindspot.js` polls the **non-p-gated** `buzz messages get` HTTP API on the
+  same ~3s cadence and feeds only un-p-tagged messages into the same handler.
+
+  The two sources handle **disjoint sets by construction** — subscription = *has*
+  `#p:<agent>`, blind spot = *has not* — so a message cannot be answered twice.
+  This is a structural guarantee, not a heuristic or a race that needs
+  de-duplicating afterwards. `handler.js` still dedupes on event id as a second
+  layer.
+
+  Cost is ~25ms of CLI time per scan, run through async `execFile` so the event
+  loop is never blocked.
+
+- **`authorAliases` config key** — `{ "<pubkeyHex>": "Name" }`, so the agent
+  addresses people by name instead of `user:fc12db5f`. The alias is passed to the
+  LLM as the message author, so an empty map is the usual reason an agent never
+  uses anyone's name.
+
+- **`listener/blindspot.test.mjs`** — 30 hermetic assertions (no network, relay
+  or credentials; the `buzz` CLI is replaced by a fixture-serving fake). Covers
+  the tag predicates, silent first-run seeding, newest-only burst control,
+  state round-trip across restart, and the 1:1 mention exemption. Verified to
+  **fail** against the pre-fix `handler.js` and against a `blindspot.js` with the
+  `#p` filter removed — a test that cannot go red proves nothing.
+
+### Changed
+- **`requireMention` no longer applies inside a 1:1 DM room.** It exists to avoid
+  answering ambient chatter in a busy channel; in a 1:1 room there is no ambient
+  chatter — every message is addressed to the agent. Previously a bare
+  "thanks!" or "i'm good too" from a phone matched no mention and was dropped,
+  which is the exact symptom this release fixes. Group-room behaviour is
+  unchanged.
+
+- Reply intents now carry `source` (`subscription` | `blindspot`), surfaced in
+  the log line as `handler: intent from … via <method> [<source>]` so it is
+  obvious which path answered.
+
+### Notes
+- **Listener-only release.** The 12 `buzz_*` tools are untouched.
+- Config gains `blindspotEnabled` (default `true`), `blindspotIntervalMs`,
+  `lookbackMessages`, `authorAliases`. Existing `config.json` files keep working
+  — every new key has a default.
+
+
 ## [1.4.9] - 2026-08-05
 
 ### Added
